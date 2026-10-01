@@ -165,7 +165,7 @@ fn highlight_rows(rows: &[Row], row_file: &[usize], files: &[FileDiff]) -> Vec<O
         while j < rows.len() && row_file[j] == fi && is_code(&rows[j]) {
             j += 1;
         }
-        if let Some(lang) = files.get(fi).and_then(|f| crate::syntax::lang_for_path(&f.filename)) {
+        if let Some(lang) = files.get(fi).and_then(|f| crate::syntax::lang_for_diff(&f.filename, f.patch.as_deref().unwrap_or(""))) {
             for side in [Kind::Add, Kind::Del] {
                 let idx: Vec<usize> = (i..j)
                     .filter(|&k| matches!(&rows[k], Row::Line { kind, .. } if *kind == side || *kind == Kind::Ctx))

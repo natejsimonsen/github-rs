@@ -62,6 +62,44 @@ pub fn lang_for_path(path: &str) -> Option<&'static str> {
     arborium::detect_language(name)
 }
 
+/// The language for a file in a diff: by name, else by a `#!` line when
+/// the diff starts at the top of the file.
+pub fn lang_for_diff(path: &str, patch: &str) -> Option<&'static str> {
+    lang_for_path(path).or_else(|| {
+        let mut lines = patch.lines();
+        let header = lines.next()?;
+        let new_start = header.split(' ').find(|w| w.starts_with('+'))?;
+        if !(new_start == "+1" || new_start.starts_with("+1,")) {
+            return None;
+        }
+        let first = lines.find(|l| !l.starts_with('-'))?.get(1..)?;
+        lang_for_shebang(first)
+    })
+}
+
+/// "#!/bin/bash", "#!/usr/bin/env python3", ...
+fn lang_for_shebang(line: &str) -> Option<&'static str> {
+    let rest = line.strip_prefix("#!")?;
+    let mut words = rest.split_whitespace();
+    let mut prog = words.next()?.rsplit('/').next()?;
+    if prog == "env" {
+        prog = words.find(|w| !w.starts_with('-'))?;
+    }
+    let prog = prog.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+    Some(match prog {
+        "sh" | "bash" | "dash" | "ksh" => "bash",
+        "zsh" => "zsh",
+        "fish" => "fish",
+        "python" => "python",
+        "node" | "deno" | "bun" => "javascript",
+        "ruby" => "ruby",
+        "perl" => "perl",
+        "php" => "php",
+        "lua" => "lua",
+        _ => return None,
+    })
+}
+
 /// The language for a fenced code block's info string ("rust", "yml", "sh", ...).
 pub fn lang_for_fence(info: &str) -> Option<String> {
     let word = info.split([' ', ',', '{']).next().unwrap_or("").trim().to_ascii_lowercase();
@@ -370,6 +408,8 @@ mod tests {
         assert_eq!(lang_for_fence("yml").as_deref(), lang_for_path("x.yaml"));
         assert_eq!(lang_for_fence("rust").as_deref(), Some("rust"));
         assert_eq!(lang_for_fence(""), None);
+        assert_eq!(lang_for_diff("bin/publish", "@@ -0,0 +1,3 @@\n+#!/usr/bin/env bash\n+set -e"), Some("bash"));
+        assert_eq!(lang_for_diff("bin/publish", "@@ -10,3 +10,3 @@\n #!/bin/sh"), None);
     }
 
     #[test]

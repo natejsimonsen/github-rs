@@ -159,10 +159,12 @@ fn header(app: &mut App, ui: &mut Ui, p: &Palette, sel: &PrSummary, d: Option<&P
 fn slim_header(ui: &mut Ui, p: &Palette, sel: &PrSummary, d: Option<&PrDetail>) {
     let state = d.map(|d| d.state.as_str()).unwrap_or(&sel.state);
     let draft = d.map(|d| d.is_draft).unwrap_or(sel.is_draft);
-    let (icon, color, _) = pr_icon(state, draft, p);
+    let (icon, _, word) = pr_icon(state, draft, p);
     ui.horizontal(|ui| {
         ui.set_min_height(32.0);
-        icons::show(ui, icon, 16.0, color);
+        // The state stays in view, like GitHub's sticky header.
+        state_badge(ui, icon, badge_color(p, state, draft), word, 24.0);
+        ui.add_space(4.0);
         // The number always shows; only the title text gets cut.
         let num = ui.painter().layout_no_wrap(format!("#{}", sel.number), theme::body(15.0), p.fg_muted);
         let mut job = egui::text::LayoutJob::default();
@@ -215,14 +217,7 @@ fn full_header(app: &mut App, ui: &mut Ui, p: &Palette, sel: &PrSummary, d: Opti
         let state = d.map(|d| d.state.as_str()).unwrap_or(&sel.state);
         let draft = d.map(|d| d.is_draft).unwrap_or(sel.is_draft);
         let (icon, _, word) = pr_icon(state, draft, p);
-        // Badges use Primer's stronger "emphasis" fills.
-        let color = match (state, draft) {
-            ("MERGED", _) => p.merged_emphasis,
-            ("CLOSED", _) => p.closed_emphasis,
-            (_, true) => p.neutral_emphasis,
-            _ => p.open_emphasis,
-        };
-        state_badge(ui, icon, color, word);
+        state_badge(ui, icon, badge_color(p, state, draft), word, 32.0);
         ui.add_space(4.0);
         // The sentence wraps in its own column, never under the badge.
         ui.horizontal_wrapped(|ui| {
@@ -572,13 +567,28 @@ fn method_popup(app: &mut App, p: &Palette, d: &PrDetail, method: &str, resp: &e
     });
 }
 
-fn state_badge(ui: &mut Ui, icon: Icon, color: Color32, word: &str) {
-    let g = ui.painter().layout_no_wrap(word.to_string(), theme::bold(14.0), Color32::WHITE);
-    let size = vec2(g.size().x + 16.0 + 6.0 + 24.0, 32.0);
+/// Badges use Primer's stronger "emphasis" fills.
+fn badge_color(p: &Palette, state: &str, draft: bool) -> Color32 {
+    match (state, draft) {
+        ("MERGED", _) => p.merged_emphasis,
+        ("CLOSED", _) => p.closed_emphasis,
+        (_, true) => p.neutral_emphasis,
+        _ => p.open_emphasis,
+    }
+}
+
+/// "Open", "Draft", ... in a filled pill, 32 tall (or smaller for the
+/// slim header).
+fn state_badge(ui: &mut Ui, icon: Icon, color: Color32, word: &str, height: f32) {
+    let k = height / 32.0;
+    let g = ui.painter().layout_no_wrap(word.to_string(), theme::bold(14.0 * k.max(0.85)), Color32::WHITE);
+    let icon_s = 16.0 * k.max(0.85);
+    let pad = 12.0 * k;
+    let size = vec2(pad + icon_s + 6.0 * k + g.size().x + pad, height);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(255), color);
-    icons::paint(ui.painter(), Rect::from_min_size(pos2(rect.left() + 12.0, rect.center().y - 8.0), vec2(16.0, 16.0)), icon, Color32::WHITE);
-    ui.painter().galley(pos2(rect.left() + 34.0, rect.center().y - g.size().y / 2.0), g, Color32::WHITE);
+    icons::paint(ui.painter(), Rect::from_min_size(pos2(rect.left() + pad, rect.center().y - icon_s / 2.0), vec2(icon_s, icon_s)), icon, Color32::WHITE);
+    ui.painter().galley(pos2(rect.left() + pad + icon_s + 6.0 * k, rect.center().y - g.size().y / 2.0), g, Color32::WHITE);
 }
 
 fn branch(ui: &mut Ui, p: &Palette, name: &str) {
@@ -1010,13 +1020,10 @@ fn commits_row(app: &mut App, ui: &mut Ui, p: &Palette, commits: &[&EventCommit]
             let msg_w = (ui.available_width() - 90.0).max(80.0);
             let mut job = egui::text::LayoutJob::default();
             super::append_title(&mut job, &c.message_headline, 13.0, false, 0.0, p);
-            for s in &mut job.sections {
-                s.format.color = p.fg_muted;
-            }
             job.wrap = egui::text::TextWrapping::truncate_at_width(msg_w);
             let g = ui.painter().layout_job(job);
             let (r, resp) = ui.allocate_exact_size(g.size(), Sense::click());
-            ui.painter().galley(r.min, g, p.fg_muted);
+            ui.painter().galley(r.min, g, p.fg);
             if resp.hovered() {
                 ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(1.0, p.accent));
             }
@@ -1190,6 +1197,7 @@ fn thread_box(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, repo: &str) {
     // `open_threads` holds threads you toggled away from their default.
     let folded = t.is_resolved != app.open_threads.contains(&t.id);
     let busy = app.busy_threads.contains(&t.id);
+    let pr_author = app.selected.as_ref().and_then(|s| s.author.as_ref()).map(|a| a.login.clone()).unwrap_or_default();
     let mut acts = Vec::new();
     ui.horizontal_top(|ui| {
         ui.add_space(GUTTER);
@@ -1270,6 +1278,9 @@ fn thread_box(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, repo: &str) {
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             comment_menu(ui, p, &c.url, &c.body, &mut acts);
+                            if !pr_author.is_empty() && login == pr_author {
+                                pill(ui, "Author", theme::bold(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
+                            }
                         });
                     });
                     ui.add_space(6.0);
@@ -1313,7 +1324,16 @@ fn thread_footer(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, busy: bool
     };
     let Some(draft) = app.thread_replies.get_mut(&t.id) else {
         if t.viewer_can_reply {
-            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+            // Your avatar beside the field, like GitHub.
+            let me = (!app.viewer.is_empty()).then(|| format!("https://github.com/{}.png?size=64", app.viewer));
+            let (rect, resp) = ui
+                .horizontal(|ui| {
+                    if let Some(url) = &me {
+                        avatar(ui, url, 24.0);
+                    }
+                    ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click())
+                })
+                .inner;
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Reply…"));
             let hovered = resp.hovered();
             ui.painter().rect(rect, 6.0, p.canvas, Stroke::new(1.0, if hovered { p.fg_muted } else { p.border }), egui::StrokeKind::Inside);
@@ -1443,7 +1463,7 @@ fn diff_tail(ui: &mut Ui, p: &Palette, hunk: &str, path: &str) {
     // The whole hunk goes through the highlighter, so the lines shown have
     // the context they need; the "+"/"-" markers stay out of it.
     let code = |l: &str| if l.starts_with("@@") { String::new() } else { l.get(1..).unwrap_or("").replace('\t', "    ") };
-    let colors = crate::syntax::lang_for_path(path).and_then(|lang| {
+    let colors = crate::syntax::lang_for_diff(path, hunk).and_then(|lang| {
         let lines: Vec<String> = numbered.iter().map(|(_, _, l)| code(l)).collect();
         crate::syntax::highlight_fragment(lang, &lines.iter().map(String::as_str).collect::<Vec<_>>())
     });
@@ -2033,7 +2053,6 @@ fn sidebar(ui: &mut Ui, p: &Palette, d: &PrDetail) {
             }
         });
     });
-    ui.label(RichText::new(&d.repository.name_with_owner).size(13.0).color(p.fg_muted));
 }
 
 // ---------- Commits ----------
