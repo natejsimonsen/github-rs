@@ -373,6 +373,7 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
                         // The highlighted row gets the Enter hint.
                         let hint_w = if on { ui.painter().layout_no_wrap("Enter to open".into(), theme::body(12.0), p.fg_muted).size().x + 16.0 } else { 0.0 };
                         job.wrap = egui::text::TextWrapping::truncate_at_width(r.width() - 44.0 - hint_w);
+                        job.wrap.break_anywhere = true;
                         let tg = ui.painter().layout_job(job);
                         ui.painter().galley(pos2(r.left() + 32.0, r.center().y - tg.size().y / 2.0), tg, p.fg);
                         if on {

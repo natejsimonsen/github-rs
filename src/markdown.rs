@@ -1477,7 +1477,7 @@ mod tests {
 
 /// A scrollbar that stays put under content that overflows sideways, so
 /// it's clear there's more (egui's default fades out when idle).
-fn solid_bar(ui: &mut Ui) {
+pub fn solid_bar(ui: &mut Ui) {
     let mut scroll = egui::style::ScrollStyle::solid();
     scroll.bar_width = 6.0;
     scroll.bar_inner_margin = 4.0;

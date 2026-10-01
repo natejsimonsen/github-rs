@@ -1059,18 +1059,20 @@ fn commits_row(app: &mut App, ui: &mut Ui, p: &Palette, commits: &[&EventCommit]
         ui.horizontal(|ui| {
             ui.add_space(GUTTER + 4.0 + 32.0 + 8.0);
             let a = c.author.as_ref().and_then(|a| a.user.as_ref());
-            avatar(ui, a.map(|u| u.avatar_url.as_str()).unwrap_or(""), 16.0);
+            super::avatar_of(ui, a.map(|u| u.login.as_str()).unwrap_or(""), a.map(|u| u.avatar_url.as_str()).unwrap_or(""), 16.0);
             let msg_w = (ui.available_width() - 90.0).max(80.0);
             let mut job = egui::text::LayoutJob::default();
             super::append_title(&mut job, &c.message_headline, 13.0, false, 0.0, p);
             job.wrap = egui::text::TextWrapping::truncate_at_width(msg_w);
             let g = ui.painter().layout_job(job);
+            let cut = g.elided;
             let (r, resp) = ui.allocate_exact_size(g.size(), Sense::click());
             ui.painter().galley(r.min, g, p.fg);
             if resp.hovered() {
                 ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(1.0, p.accent));
             }
-            if resp.tip(&c.message_headline).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            let resp = if cut { resp.tip_below(&c.message_headline) } else { resp };
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 app.actions.push(Action::OpenUrl(format!("https://github.com/{repo}/commit/{}", c.oid)));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1559,6 +1561,7 @@ fn diff_tail(ui: &mut Ui, p: &Palette, hunk: &str, path: &str) {
     let widest = tail.iter().map(|(_, _, l)| ui.painter().layout_no_wrap(code(l), theme::mono(12.0), p.fg).size().x).fold(0.0, f32::max);
     let row_w = ui.available_width().max(num_w * 2.0 + 10.0 + 14.0 + widest + 16.0);
     let scroll_id = ui.id().with(("snippet", hunk.len(), path));
+    crate::markdown::solid_bar(ui);
     egui::ScrollArea::horizontal().id_salt(scroll_id).auto_shrink([false, true]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded).show(ui, |ui| {
     ui.spacing_mut().item_spacing.y = 0.0;
     for (k, (o, n, l)) in tail.iter().enumerate() {
@@ -2113,7 +2116,7 @@ fn sidebar(ui: &mut Ui, p: &Palette, d: &PrDetail) {
         for (login, url, state) in &reviewers {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
-                avatar(ui, url, 24.0);
+                super::avatar_of(ui, login, url, 24.0);
                 ui.label(RichText::new(login).font(theme::bold(14.0)).color(p.fg));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let (icon, color) = match *state {
@@ -2135,7 +2138,7 @@ fn sidebar(ui: &mut Ui, p: &Palette, d: &PrDetail) {
         for a in &d.assignees.nodes {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
-                avatar(ui, &a.avatar_url, 24.0);
+                super::avatar_of(ui, &a.login, &a.avatar_url, 24.0);
                 ui.label(RichText::new(&a.login).font(theme::bold(14.0)).color(p.fg));
             });
         }
@@ -2236,12 +2239,14 @@ fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail, repo: &str,
                         super::append_title(&mut job, &c.message_headline, 14.0, true, 0.0, p);
                         job.wrap = egui::text::TextWrapping::truncate_at_width(w - icon_w);
                         let g = ui.painter().layout_job(job);
+                        let cut = g.elided;
                         let (rect, resp) = ui.allocate_exact_size(g.size(), Sense::click());
                         ui.painter().galley(rect.min, g, p.fg);
                         if resp.hovered() {
                             ui.painter().hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, p.accent));
                         }
-                        if resp.tip(&c.message_headline).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        let resp = if cut { resp.tip_below(&c.message_headline) } else { resp };
+                        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                             app.actions.push(Action::OpenUrl(url.clone()));
                         }
                         if has_body {
@@ -2268,7 +2273,7 @@ fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail, repo: &str,
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         let user = c.author.as_ref().and_then(|a| a.user.as_ref());
-                        avatar(ui, user.map(|u| u.avatar_url.as_str()).unwrap_or(""), 16.0);
+                        super::avatar_of(ui, user.map(|u| u.login.as_str()).unwrap_or(""), user.map(|u| u.avatar_url.as_str()).unwrap_or(""), 16.0);
                         let name = user.map(|u| u.login.clone()).or_else(|| c.author.as_ref().and_then(|a| a.name.clone())).unwrap_or_default();
                         ui.label(RichText::new(name).font(theme::bold(12.0)).color(p.fg));
                         ui.label(RichText::new(format!("committed {}", util::ago(&c.committed_date))).size(12.0).color(p.fg_muted));
@@ -2456,16 +2461,21 @@ fn check_row(app: &mut App, ui: &mut Ui, p: &Palette, c: &Check) {
             let name_max = (max - note_w - 8.0).max(max * 0.6).max(80.0);
             job.wrap = egui::text::TextWrapping::truncate_at_width(name_max);
             let g = ui.painter().layout_job(job);
+            let mut cut = g.elided;
             let (r, resp) = ui.allocate_exact_size(g.size(), Sense::hover());
             ui.painter().galley(r.min, g, p.fg);
             if !note.is_empty() {
                 let mut job = egui::text::LayoutJob::single_section(note.clone(), egui::TextFormat { font_id: theme::body(13.0), color: p.fg_muted, ..Default::default() });
                 job.wrap = egui::text::TextWrapping::truncate_at_width((max - r.width() - 8.0).max(40.0));
                 let g = ui.painter().layout_job(job);
+                cut |= g.elided;
                 let (r, _) = ui.allocate_exact_size(g.size(), Sense::hover());
                 ui.painter().galley(r.min, g, p.fg_muted);
             }
-            resp.tip(format!("{name}\n{note}"));
+            // The whole text, but only when some of it was cut.
+            if cut {
+                resp.tip(format!("{name}\n{note}"));
+            }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(u) = &c.url {
                     if link(ui, "Details", 13.0, p).clicked() {

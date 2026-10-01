@@ -22,6 +22,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     let error = list.and_then(|l| l.error.clone());
 
     let mut retry = false;
+    // Both toggles share one pair of totals, so the other list's will do.
+    let other_counts = app.lists.get(&format!("list-{}-{}", !app.closed, app.view.query())).and_then(|l| l.data.as_ref()).map(|d| (d.open, d.closed));
+    let known_empty = other_counts.is_some_and(|(o, c)| if app.closed { c == 0 } else { o == 0 });
     plain_box(ui, |ui| {
         // Box header: "44 Open   120 Closed"
         egui::Frame::new()
@@ -33,9 +36,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     // Counts are unknown until the list loads: "– Open", not "0 Open".
-                    // Both lists share one pair, so the other one's will do.
-                    let other = app.lists.get(&format!("list-{}-{}", !app.closed, app.view.query())).and_then(|l| l.data.as_ref());
-                    let counts = data.as_ref().map(|d| (d.open, d.closed)).or_else(|| other.map(|d| (d.open, d.closed)));
+                    let counts = data.as_ref().map(|d| (d.open, d.closed)).or(other_counts);
                     // Unknown counts stay out, not "0" or a dash.
                     let (open, closed) = counts.map(|(o, c)| (format!("{o} "), format!("{c} "))).unwrap_or_default();
                     for (is_closed, icon, n, word) in [(false, Icon::PrOpen, open, "Open"), (true, Icon::Check, closed, "Closed")] {
@@ -72,7 +73,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.vertical_centered(|ui| {
                 if loading {
                     ui.add(egui::Spinner::new().size(32.0).color(p.fg_muted));
-                } else if data.is_none() && error.is_none() {
+                } else if data.is_none() && error.is_none() && !known_empty {
                     // Nothing came back at all (e.g. cache-only mode): don't
                     // claim the search is empty.
                     ui.label(RichText::new("Not loaded yet").font(theme::bold(16.0)).color(p.fg));
@@ -141,8 +142,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 let resp = row(ui, p, pr, detail.as_deref(), selected);
                 if scroll_to == Some(last) && i == last && data.as_ref().is_some_and(|d| d.next.is_some()) {
                     // Handled below, once the footer exists.
-                } else if scroll_to == Some(i) || (selected && shown != sel_id) {
+                } else if scroll_to == Some(i) {
                     resp.scroll_to_me(None);
+                    ui.ctx().data_mut(|d| d.insert_temp(shown_id, sel_id.clone()));
+                } else if selected && shown != sel_id {
+                    resp.scroll_to_me(Some(egui::Align::Center));
                     ui.ctx().data_mut(|d| d.insert_temp(shown_id, sel_id.clone()));
                 }
                 if resp.clicked() {
@@ -354,7 +358,7 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
             let label = hidden_active.map(|i| format!("{} ▾", SECTIONS[i].title)).unwrap_or_else(|| "More ▾".into());
             let width = ui.painter().layout_no_wrap(label.clone(), theme::bold(13.0), p.fg).size().x + pad;
             let resp = seg(ui, shown, &label, width, hidden_active.is_some());
-            egui::Popup::menu(&resp).align(egui::RectAlign::BOTTOM_END).show(|ui| {
+            egui::Popup::menu(&resp).align(egui::RectAlign::BOTTOM_START).show(|ui| {
                 ui.set_max_width(200.0);
                 ui.spacing_mut().item_spacing.y = 0.0;
                 // Room for the check mark only when a hidden section is active.
@@ -485,7 +489,7 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     // The right column is only as wide as what's in it: the comment count
     // and the assignees' faces. The title gets the rest.
     let who = &pr.assignees.nodes;
-    let comment_w = if comments > 0 { 44.0 } else { 0.0 };
+    let comment_w = if comments > 0 { 24.0 + ui.painter().layout_no_wrap(comments.to_string(), theme::bold(12.0), p.fg_muted).size().x } else { 0.0 };
     let faces_w = if who.is_empty() { 0.0 } else { 20.0 + (who.len() - 1) as f32 * 12.0 + if comments > 0 { 8.0 } else { 0.0 } };
     let right = 16.0 + comment_w + faces_w + if comment_w + faces_w > 0.0 { 12.0 } else { 0.0 };
     let text_w = (width - left - right).max(80.0);
