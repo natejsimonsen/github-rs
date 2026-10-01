@@ -413,9 +413,11 @@ fn merge_bar(app: &mut App, ui: &mut Ui, p: &Palette, ms: &super::MergeStatus, d
                 }
             };
             if reason_below {
+                ui.spacing_mut().item_spacing.y = 2.0;
                 egui::Sides::new().shrink_left().show(ui, status, controls);
                 ui.horizontal(|ui| {
-                    ui.add_space(36.0);
+                    // 28px icon + the two gaps before the title.
+                    ui.add_space(28.0 + 4.0 + ui.spacing().item_spacing.x);
                     ui.label(RichText::new(&ms.detail).size(13.0).color(p.fg_muted));
                 });
             } else if stacked {
@@ -850,7 +852,7 @@ fn timeline(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
             }
             Item::Events(events) => {
                 timeline_gap(ui, p);
-                event_row(app, ui, p, events, repo);
+                event_row(app, ui, p, events, repo, &d.head_ref_name);
             }
             Item::Commits(commits) => {
                 timeline_gap(ui, p);
@@ -935,7 +937,7 @@ fn sha_link(app: &mut App, ui: &mut Ui, p: &Palette, repo: &str, c: &EventCommit
 }
 
 /// Merged, closed, reopened, branch deleted, force-pushed, labeled, ...
-fn event_row(app: &mut App, ui: &mut Ui, p: &Palette, events: &[&Event], repo: &str) {
+fn event_row(app: &mut App, ui: &mut Ui, p: &Palette, events: &[&Event], repo: &str, head_ref: &str) {
     let e = events[0];
     let muted = |ui: &mut Ui, t: &str| {
         ui.label(RichText::new(t).color(p.fg_muted));
@@ -961,7 +963,9 @@ fn event_row(app: &mut App, ui: &mut Ui, p: &Palette, events: &[&Event], repo: &
             muted(ui, &format!("branch {ago}"));
         }),
         "HeadRefForcePushedEvent" => event_line(ui, p, Icon::Commit, None, who, |ui| {
-            muted(ui, "force-pushed the branch from");
+            muted(ui, "force-pushed the");
+            branch(ui, p, head_ref);
+            muted(ui, "branch from");
             if let Some(c) = &e.before_commit {
                 sha_link(app, ui, p, repo, c);
             }
@@ -1018,8 +1022,12 @@ fn event_row(app: &mut App, ui: &mut Ui, p: &Palette, events: &[&Event], repo: &
             let added: Vec<_> = events.iter().filter(|e| e.kind == "LabeledEvent").filter_map(|e| e.label.as_ref()).collect();
             let removed: Vec<_> = events.iter().filter(|e| e.kind == "UnlabeledEvent").filter_map(|e| e.label.as_ref()).collect();
             // "added a b and removed c labels", like GitHub.
+            let one = added.len() + removed.len() == 1;
             for (i, (word, labels)) in [("added", &added), ("removed", &removed)].into_iter().filter(|(_, l)| !l.is_empty()).enumerate() {
                 muted(ui, if i == 0 { word } else if word == "removed" { "and removed" } else { word });
+                if one {
+                    muted(ui, "the");
+                }
                 for l in labels.iter() {
                     label_pill(ui, &l.name, &l.color);
                 }
@@ -1187,7 +1195,7 @@ fn comment_card(
 
 /// "⋯" menu on a comment, like github.com's.
 fn comment_menu(ui: &mut Ui, p: &Palette, url: &str, body: &str, acts: &mut Vec<Action>) {
-    let resp = icon_button(ui, Icon::Kebab, "More actions", p);
+    let resp = super::icon_button_plain(ui, Icon::Kebab, "More actions", p);
     egui::Popup::menu(&resp).align(egui::RectAlign::BOTTOM_END).show(|ui| {
         ui.set_min_width(170.0);
         if ui.button("Copy link").clicked() {
@@ -1230,9 +1238,13 @@ fn review_event(ui: &mut Ui, p: &Palette, r: &Review) {
         ui.painter().circle(rect.center(), 16.0, badge_bg, Stroke::new(2.0, p.canvas));
         icons::paint(ui.painter(), rect.shrink(8.0), icon, badge_fg);
         ui.add_space(4.0);
-        avatar(ui, r.author.as_ref().map(|a| a.avatar_url.as_str()).unwrap_or(""), 20.0);
+        let av = r.author.as_ref().map(|a| a.avatar_url.as_str()).unwrap_or("");
+        avatar(ui, av, 20.0);
         ui.spacing_mut().item_spacing.x = 4.0;
         ui.label(RichText::new(login).font(theme::bold(14.0)).color(p.fg));
+        if is_bot(login, av) {
+            pill(ui, "bot", theme::body(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
+        }
         ui.label(RichText::new(verb).color(p.fg_muted));
         ui.label(RichText::new(util::ago(r.submitted_at.as_deref().unwrap_or(""))).color(p.fg_muted));
     });
@@ -1652,7 +1664,7 @@ fn merge_box(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
             big_icon = Icon::PrMerged;
             // Same color as the bar at the top, so the two never disagree.
             let bar = detail_merge_status(p, d, None).map(|m| m.color);
-            big_color = if ok { p.open_emphasis } else if d.is_draft { p.neutral } else { bar.unwrap_or(p.neutral) };
+            big_color = if ok { p.open_emphasis } else if d.is_draft { p.neutral_emphasis } else { bar.unwrap_or(p.neutral_emphasis) };
         }
     }
     let open = d.state == "OPEN";

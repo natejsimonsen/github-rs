@@ -18,9 +18,14 @@ pub fn main(app: &mut App, ui: &mut Ui) {
     // Narrow windows: the list folds to its rail on its own (⌘B still opens
     // it), and it never takes more than ~40% of the width.
     let width = ui.available_width();
-    app.narrow = width < NARROW;
+    // On Files, the diff keeps at least 900px (below that the tree hides),
+    // so the list folds sooner there and never grows past what's left.
+    let files = app.tab == crate::app::Tab::Files && app.selected.is_some();
+    let room = width - 900.0 - 40.0;
+    app.narrow = width < NARROW || (files && room < 300.0);
     let mut open = if app.narrow { app.list_open_narrow } else { app.panels.list };
     let max = if app.narrow { 340.0 } else { (width * 0.42).clamp(300.0, 760.0) };
+    let max = if files && !app.narrow { max.min(room.max(300.0)) } else { max };
     // The PR list slides closed to a thin strip of PR icons. Drag its edge
     // past the minimum width to close it too.
     egui::Panel::show_switched(
@@ -213,13 +218,14 @@ fn loaded_prs(app: &App) -> Vec<&crate::github::PrSummary> {
 /// ⌘K: type a PR number, `owner/repo#123`, or paste a link to open it.
 pub fn goto_box(app: &mut App, ctx: &egui::Context) {
     let default_repo = app.default_repo();
-    let typed = app.goto.as_ref().map(|g| g.text.trim().to_lowercase()).unwrap_or_default();
+    let raw = app.goto.as_ref().map(|g| g.text.trim().to_string()).unwrap_or_default();
+    let typed = raw.to_lowercase();
     let loaded = loaded_prs(app);
     let mut results: Vec<GoResult> = Vec::new();
     let has = |results: &[GoResult], id: &str| results.iter().any(|r| matches!(r, GoResult::Pr(p) if p.id == id));
     let digits = typed.trim_start_matches('#');
     let bare = !digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit());
-    let parsed = crate::util::parse_pr_ref(&typed, default_repo.as_deref());
+    let parsed = crate::util::parse_pr_ref(&raw, default_repo.as_deref());
     if bare {
         // Loaded PRs with that number first (the default repo is only a
         // guess), then numbers that start with it, then the guess.
@@ -670,6 +676,18 @@ fn icon_button_at(ui: &mut Ui, icon: Icon, label: &str, p: &Palette, above: bool
     tip_at(&resp, label, above);
     let bg = if resp.hovered() { ui.visuals().widgets.hovered.weak_bg_fill } else { p.btn_bg };
     ui.painter().rect(rect, 6.0, bg, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
+    icons::paint(ui.painter(), rect.shrink(8.0), icon, p.fg_muted);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// An icon button with no frame until hovered, like GitHub's "⋯".
+pub fn icon_button_plain(ui: &mut Ui, icon: Icon, label: &str, p: &Palette) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
+    tip(&resp, label);
+    if resp.hovered() {
+        ui.painter().rect_filled(rect, 6.0, p.hover_row);
+    }
     icons::paint(ui.painter(), rect.shrink(8.0), icon, p.fg_muted);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

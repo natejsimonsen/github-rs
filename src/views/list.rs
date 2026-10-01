@@ -36,11 +36,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     // Both lists share one pair, so the other one's will do.
                     let other = app.lists.get(&format!("list-{}-{}", !app.closed, app.view.query())).and_then(|l| l.data.as_ref());
                     let counts = data.as_ref().map(|d| (d.open, d.closed)).or_else(|| other.map(|d| (d.open, d.closed)));
-                    let counts = counts.map(|(o, c)| (o.to_string(), c.to_string()));
-                    let (open, closed) = counts.unwrap_or(("–".into(), "–".into()));
+                    // Unknown counts stay out, not "0" or a dash.
+                    let (open, closed) = counts.map(|(o, c)| (format!("{o} "), format!("{c} "))).unwrap_or_default();
                     for (is_closed, icon, n, word) in [(false, Icon::PrOpen, open, "Open"), (true, Icon::Check, closed, "Closed")] {
                         let active = app.closed == is_closed;
-                        if state_toggle(ui, p, icon, &format!("{n} {word}"), active).clicked() && !active {
+                        if state_toggle(ui, p, icon, &format!("{n}{word}"), active).clicked() && !active {
                             app.actions.push(Action::SetClosed(is_closed));
                         }
                     }
@@ -173,6 +173,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 });
                 ui.add_space(16.0);
             }
+            ui.add_space(12.0);
         });
     });
     if retry {
@@ -442,10 +443,13 @@ fn fresher_detail(app: &App, pr: &PrSummary) -> Option<std::sync::Arc<PrDetail>>
 /// Merge status for a list row: from the PR's details when loaded (more
 /// accurate), otherwise from the list's own data.
 fn row_status(p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>) -> Option<super::MergeStatus> {
-    match detail {
+    let ms = match detail {
         Some(d) => super::detail_merge_status(p, d, pr.merge_state_status.as_deref()),
         None => super::merge_status(p, &pr.state, pr.is_draft, pr.merge_state_status.as_deref(), None, pr.auto_merge, String::new()),
-    }
+    };
+    // "Review required" is already in the meta line; GitHub doesn't call
+    // that ready.
+    ms.filter(|m| !(m.short == "Ready to merge" && pr.review_decision.as_deref() == Some("REVIEW_REQUIRED")))
 }
 
 /// "19 hours ago" that never wraps in the middle.
@@ -557,12 +561,15 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     let who = pr.author.as_ref().map(|a| a.login.as_str()).unwrap_or("ghost");
     // "by octocat" never splits across lines.
     let who = &who.to_string();
-    // One unbreakable run, so it only wraps before a "•" chip.
-    let meta = nb(&match pr.state.as_str() {
-        "MERGED" => format!("#{} by {who} was merged {}", pr.number, util::ago(pr.merged_at.as_deref().unwrap_or(&pr.updated_at))),
-        "CLOSED" => format!("#{} by {who} was closed {}", pr.number, util::ago(pr.closed_at.as_deref().unwrap_or(&pr.updated_at))),
-        _ => format!("#{} opened {} by {who}", pr.number, util::ago(&pr.created_at)),
-    });
+    let meta = match pr.state.as_str() {
+        "MERGED" => format!("#{}\u{a0}by\u{a0}{who} was merged {}", pr.number, nb(&util::ago(pr.merged_at.as_deref().unwrap_or(&pr.updated_at)))),
+        "CLOSED" => format!("#{}\u{a0}by\u{a0}{who} was closed {}", pr.number, nb(&util::ago(pr.closed_at.as_deref().unwrap_or(&pr.updated_at)))),
+        _ => format!("#{} opened {} by\u{a0}{who}", pr.number, nb(&util::ago(&pr.created_at))),
+    };
+    // One run when it fits, so it only wraps before a "•" chip. Too wide
+    // for that, it wraps at its own spaces instead of inside words.
+    let one_run = nb(&meta);
+    let meta = if ui.painter().layout_no_wrap(one_run.clone(), theme::body(12.0), p.fg_muted).size().x <= text_w { one_run } else { meta };
     let mut meta_job = egui::text::LayoutJob::default();
     meta_job.wrap.max_width = text_w;
     meta_job.append(&meta, 0.0, egui::TextFormat { font_id: theme::body(12.0), color: p.fg_muted, ..Default::default() });

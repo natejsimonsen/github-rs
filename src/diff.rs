@@ -231,7 +231,7 @@ pub fn build(files: Arc<Vec<FileDiff>>, is_collapsed: impl Fn(&FileDiff) -> bool
             None => rows.push(Row::Note("Binary file, or diff too large to show here.".into())),
             Some(patch) => {
                 let (full, shown) = expansion(f);
-                let can_expand = f.status != "removed";
+                let can_expand = f.status != "removed" && f.status != "added";
                 // A context line from the full file; `n` is 1-based.
                 let ctx_line = |n: u32, offset: i64, file_chars: &mut Vec<usize>| {
                     let text = full.as_ref().and_then(|t| t.get(n as usize - 1)).map(|l| l.replace('\t', "    ")).unwrap_or_default();
@@ -816,7 +816,9 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
                         painter.rect_filled(area, 0.0, if resp.hovered() { p.accent_emphasis } else { p.diff_hunk_num });
                         let color = if resp.hovered() { egui::Color32::WHITE } else { p.fg_muted };
                         unfold_arrow(painter, area.center(), arrow, color);
-                        if resp.tip_above(&label).on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        let under_header = i > 0 && matches!(layout.rows[i - 1], Row::Header(..));
+                        let resp = if under_header { resp.tip(&label) } else { resp.tip_above(&label) };
+                        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                             app.actions.push(Action::ExpandHunk(path.clone(), key, amount));
                         }
                     }
