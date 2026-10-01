@@ -20,7 +20,7 @@ pub fn main(app: &mut App, ui: &mut Ui) {
     let width = ui.available_width();
     // On Files, the diff keeps at least 900px (below that the tree hides),
     // so the list folds sooner there and never grows past what's left.
-    let files = app.tab == crate::app::Tab::Files && app.selected.is_some();
+    let files = app.tab != crate::app::Tab::Conversation && app.selected.is_some();
     let room = width - 900.0 - 40.0;
     app.narrow = width < NARROW || (files && room < 300.0);
     let mut open = if app.narrow { app.list_open_narrow } else { app.panels.list };
@@ -262,6 +262,7 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
 
     let mut picked: Option<crate::github::PrSummary> = None;
     let mut submit = false;
+    let mut search_for: Option<String> = None;
     let Some(g) = app.goto.as_mut() else { return };
     // The highlight follows a result, not a position, so it can't jump to
     // another PR when the results change.
@@ -319,7 +320,8 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
                 } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     match results.get(sel) {
                         Some(GoResult::Pr(pr)) => picked = Some(pr.clone()),
-                        _ => submit = true,
+                        Some(GoResult::Ref(..)) => submit = true,
+                        None => {}
                     }
                 }
             });
@@ -388,7 +390,22 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
                     }
                 });
             } else if !g.text.trim().is_empty() {
-                ui.label(RichText::new("No matching pull requests.").color(p.fg_muted).size(13.0));
+                // Nothing loaded matches: offer GitHub's search for it.
+                let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Search pull requests"));
+                ui.painter().rect_filled(r, 6.0, p.hover_row);
+                ui.painter().rect_filled(Rect::from_min_size(r.min + vec2(0.0, 5.0), vec2(2.0, 20.0)), 1.0, p.accent_emphasis);
+                icons::paint(ui.painter(), Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - 7.0), vec2(14.0, 14.0)), Icon::Search, p.fg_muted);
+                let mut job = egui::text::LayoutJob::default();
+                job.append("Search pull requests for ", 0.0, egui::TextFormat { font_id: theme::body(13.0), color: p.fg_muted, ..Default::default() });
+                job.append(&format!("\"{}\"", g.text.trim()), 0.0, egui::TextFormat { font_id: theme::bold(13.0), color: p.fg, ..Default::default() });
+                job.wrap = egui::text::TextWrapping::truncate_at_width(r.width() - 44.0 - 110.0);
+                let tg = ui.painter().layout_job(job);
+                ui.painter().galley(pos2(r.left() + 32.0, r.center().y - tg.size().y / 2.0), tg, p.fg);
+                ui.painter().text(pos2(r.right() - 8.0, r.center().y), egui::Align2::RIGHT_CENTER, "Enter to search", theme::body(12.0), p.fg_muted);
+                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    search_for = Some(g.text.trim().to_string());
+                }
             } else {
                 let hint = match &default_repo {
                     Some(r) => format!("A bare number opens a PR in {r}. Esc to close."),
@@ -401,6 +418,9 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
     if let Some(pr) = picked {
         app.goto = None;
         app.actions.push(Action::Select(pr));
+    } else if let Some(q) = search_for {
+        app.goto = None;
+        app.actions.push(Action::RunSearch(q));
     } else if submit {
         app.actions.push(Action::GoTo);
     } else if resp.should_close() {
@@ -608,6 +628,8 @@ pub trait Tip {
     fn tip(self, text: impl AsRef<str>) -> Self;
     /// Above the widget, for spots where the text beside it matters.
     fn tip_above(self, text: impl AsRef<str>) -> Self;
+    /// Below it, when what's above matters too.
+    fn tip_below(self, text: impl AsRef<str>) -> Self;
 }
 
 impl Tip for egui::Response {
@@ -617,19 +639,42 @@ impl Tip for egui::Response {
     }
 
     fn tip_above(self, text: impl AsRef<str>) -> Self {
-        tip_at(&self, text.as_ref(), true);
+        tip_at(&self, text.as_ref(), Side::Above);
         self
     }
+
+    fn tip_below(self, text: impl AsRef<str>) -> Self {
+        tip_at(&self, text.as_ref(), Side::Below);
+        self
+    }
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum Side {
+    Auto,
+    Above,
+    Below,
 }
 
 /// Primer's tooltip: dark, small white text, beside the widget instead of
 /// under the pointer.
 pub fn tip(resp: &egui::Response, text: &str) {
-    tip_at(resp, text, false);
+    tip_at(resp, text, Side::Auto);
 }
 
-fn tip_at(resp: &egui::Response, text: &str, above: bool) {
+fn tip_at(resp: &egui::Response, text: &str, side: Side) {
     if !resp.hovered() || resp.ctx.dragged_id().is_some() || egui::Popup::is_any_open(&resp.ctx) {
+        return;
+    }
+    // After a click, nothing shows until the pointer moves: a button that
+    // swaps for another under a resting pointer shouldn't pop its tooltip.
+    let click_id = egui::Id::new("tip-click-pos");
+    let pointer = resp.ctx.input(|i| i.pointer.latest_pos());
+    if resp.ctx.input(|i| i.pointer.any_click()) {
+        resp.ctx.data_mut(|d| d.insert_temp(click_id, pointer));
+        return;
+    }
+    if resp.ctx.data(|d| d.get_temp::<Option<egui::Pos2>>(click_id)).flatten().is_some_and(|at| Some(at) == pointer) {
         return;
     }
     let p = theme::palette(&resp.ctx);
@@ -637,8 +682,10 @@ fn tip_at(resp: &egui::Response, text: &str, above: bool) {
     let screen = resp.ctx.content_rect();
     // To the right if there's room, else below; near the right edge, below
     // and right-aligned so it stays inside the window.
-    let (pos, pivot) = if above && r.top() > screen.top() + 40.0 {
+    let (pos, pivot) = if side == Side::Above && r.top() > screen.top() + 40.0 {
         (egui::pos2(r.left(), r.top() - 6.0), egui::Align2::LEFT_BOTTOM)
+    } else if side == Side::Below {
+        (egui::pos2(r.left(), r.bottom() + 6.0), egui::Align2::LEFT_TOP)
     } else if r.right() + 340.0 < screen.right() {
         (egui::pos2(r.right() + 6.0, r.center().y), egui::Align2::LEFT_CENTER)
     } else if r.center().x + 170.0 < screen.right() {
@@ -673,7 +720,7 @@ pub fn icon_button_tip_above(ui: &mut Ui, icon: Icon, label: &str, p: &Palette) 
 fn icon_button_at(ui: &mut Ui, icon: Icon, label: &str, p: &Palette, above: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
-    tip_at(&resp, label, above);
+    tip_at(&resp, label, if above { Side::Above } else { Side::Auto });
     let bg = if resp.hovered() { ui.visuals().widgets.hovered.weak_bg_fill } else { p.btn_bg };
     ui.painter().rect(rect, 6.0, bg, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
     icons::paint(ui.painter(), rect.shrink(8.0), icon, p.fg_muted);
@@ -870,7 +917,11 @@ pub fn detail_merge_status(p: &Palette, d: &PrDetail, list_state: Option<&str>) 
         Some("BLOCKED") | Some("UNKNOWN") | None if ready => Some("CLEAN"),
         other => other,
     };
-    merge_status(p, &d.state, d.is_draft, state, d.auto_merge_request.as_ref(), false, why.join(" · "))
+    let mut detail = why.join(" · ");
+    if let Some(first) = detail.get(..1) {
+        detail = first.to_uppercase() + &detail[1..] + ".";
+    }
+    merge_status(p, &d.state, d.is_draft, state, d.auto_merge_request.as_ref(), false, detail)
 }
 
 /// Counts of checks by outcome.

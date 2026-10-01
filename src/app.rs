@@ -401,6 +401,16 @@ impl App {
         app
     }
 
+    /// A new list (section, search, open/closed) starts at the top, like
+    /// GitHub, instead of scrolling to wherever the old selection sits.
+    fn reset_list_scroll(&mut self) {
+        self.ctx.data_mut(|d| {
+            d.insert_temp(egui::Id::new("list-reset-scroll"), true);
+            d.insert_temp(egui::Id::new("list-shown-selection"), self.selected.as_ref().map(|s| s.id.clone()));
+            d.insert_temp(egui::Id::new("rail-shown-selection"), self.selected.as_ref().map(|s| s.id.clone()).unwrap_or_default());
+        });
+    }
+
     /// The next page of the list on screen, added to its end.
     fn load_more(&mut self) {
         let view = self.view.clone();
@@ -1030,6 +1040,7 @@ impl App {
             Action::SetView(v) => {
                 self.view = v.clone();
                 self.follow_list = true;
+                self.reset_list_scroll();
                 let stale = self.lists.get(&self.list_key(&v)).is_none_or(|l| l.fetched.is_none());
                 if stale || matches!(v, View::Search(_)) {
                     self.load_list(v);
@@ -1040,6 +1051,7 @@ impl App {
             Action::SetClosed(c) => {
                 self.closed = c;
                 self.follow_list = true;
+                self.reset_list_scroll();
                 self.load_list(self.view.clone());
             }
             Action::Select(pr) => {

@@ -126,13 +126,22 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let shown_id = egui::Id::new("list-shown-selection");
         let shown: Option<String> = ui.ctx().data(|d| d.get_temp(shown_id));
         let sel_id = app.selected.as_ref().map(|s| s.id.clone());
-        egui::ScrollArea::vertical().id_salt("pr-list").auto_shrink([false, false]).show(ui, |ui| {
+        let reset = ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::new("list-reset-scroll"))).unwrap_or(false);
+        let mut area = egui::ScrollArea::vertical().id_salt("pr-list").auto_shrink([false, false]);
+        if reset {
+            area = area.vertical_scroll_offset(0.0);
+        }
+        // j onto the last row shows the "Load more" footer under it too.
+        let last = rows.len().saturating_sub(1);
+        area.show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             for (i, pr) in rows.iter().enumerate() {
                 let selected = app.selected.as_ref().is_some_and(|s| s.id == pr.id);
                 let detail = fresher_detail(app, pr);
                 let resp = row(ui, p, pr, detail.as_deref(), selected);
-                if scroll_to == Some(i) || (selected && shown != sel_id) {
+                if scroll_to == Some(last) && i == last && data.as_ref().is_some_and(|d| d.next.is_some()) {
+                    // Handled below, once the footer exists.
+                } else if scroll_to == Some(i) || (selected && shown != sel_id) {
                     resp.scroll_to_me(None);
                     ui.ctx().data_mut(|d| d.insert_temp(shown_id, sel_id.clone()));
                 }
@@ -169,7 +178,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         app.actions.push(Action::LoadMore);
                     }
                     ui.add_space(6.0);
-                    ui.label(RichText::new(format!("Showing {} of {total}", rows.len())).size(12.0).color(p.fg_muted));
+                    let note = ui.label(RichText::new(format!("Showing {} of {total}", rows.len())).size(12.0).color(p.fg_muted));
+                    if scroll_to == Some(last) {
+                        note.scroll_to_me(Some(egui::Align::Max));
+                        ui.ctx().data_mut(|d| d.insert_temp(shown_id, sel_id.clone()));
+                    }
                 });
                 ui.add_space(16.0);
             }
@@ -252,7 +265,13 @@ pub fn rail(app: &mut App, ui: &mut Ui) {
             let detail = fresher_detail(app, pr);
             let status = row_status(p, pr, detail.as_deref()).filter(|m| m.short != "Checking" && m.short != "Draft");
             if let Some(ms) = &status {
-                ui.painter().circle(rect.right_bottom() - vec2(8.0, 8.0), 4.0, ms.color, Stroke::new(1.5, p.canvas_subtle));
+                let at = rect.right_bottom() - vec2(8.0, 8.0);
+                if ms.short == "Conflicts" {
+                    // A ring, so it reads differently from "Blocked" at a glance.
+                    ui.painter().circle(at, 4.0, p.canvas_subtle, Stroke::new(2.0, ms.color));
+                } else {
+                    ui.painter().circle(at, 4.0, ms.color, Stroke::new(1.5, p.canvas_subtle));
+                }
             }
             let tip = match &status {
                 Some(ms) => format!("{}#{} {}\n{}", pr.repository.name_with_owner, pr.number, pr.title, ms.short),

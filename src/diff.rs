@@ -119,6 +119,13 @@ fn word_changes(rows: &[Row]) -> Vec<Option<std::ops::Range<usize>>> {
 /// The changed middles of two lines, or None when they share too little
 /// to be worth marking (or nothing changed).
 fn changed_span(a: &str, b: &str) -> Option<(std::ops::Range<usize>, std::ops::Range<usize>)> {
+    // Indentation isn't content: it's left out of the comparison and never
+    // marked, so a re-indented block doesn't pair up unrelated lines.
+    let (ia, ib) = (a.len() - a.trim_start().len(), b.len() - b.trim_start().len());
+    let (a, b) = (&a[ia..], &b[ib..]);
+    if a == b {
+        return None;
+    }
     let pre = a.char_indices().zip(b.chars()).find(|((_, x), y)| x != y).map(|((i, _), _)| i).unwrap_or(a.len().min(b.len()));
     let max_suf = a.len().min(b.len()) - pre;
     let mut suf = 0;
@@ -139,12 +146,14 @@ fn changed_span(a: &str, b: &str) -> Option<(std::ops::Range<usize>, std::ops::R
     }
     let (ea, eb) = (a.len() - suf, b.len() - suf);
     let shared = start + suf;
-    let longest = a.trim().len().max(b.trim().len());
-    // Mostly rewritten lines: GitHub leaves those plain.
-    if shared == 0 || (start >= ea && start >= eb) || shared * 3 < longest {
+    let longest = a.len().max(b.len());
+    // Mostly rewritten lines, or ones that only share punctuation: GitHub
+    // leaves those plain.
+    let shares_word = a[..start].chars().chain(a[ea..].chars()).any(word);
+    if !shares_word || shared * 3 < longest {
         return None;
     }
-    Some((start..ea.max(start), start..eb.max(start)))
+    Some((ia + start..ia + ea.max(start), ib + start..ib + eb.max(start)))
 }
 
 /// Highlights each hunk twice, once as the new side (context and added
@@ -261,6 +270,8 @@ pub fn build(files: Arc<Vec<FileDiff>>, is_collapsed: impl Fn(&FileDiff) -> bool
                         for n in last_new + 1..=last_new + down {
                             rows.push(ctx_line(n, hunk_offset, &mut file_chars));
                         }
+                        // The header covers the lines shown above it, like GitHub.
+                        let text = if up > 0 { shift_hunk_header(&text, up) } else { text };
                         if can_expand && hidden > 0 {
                             let kind = if hidden <= EXPAND {
                                 Expand::All
@@ -336,6 +347,19 @@ pub fn build(files: Arc<Vec<FileDiff>>, is_collapsed: impl Fn(&FileDiff) -> bool
     let colors = highlight_rows(&rows, &row_file, &files);
     let changes = word_changes(&rows);
     Layout { rows, tops, total: y, files, file_tops, file_bottoms, row_file, file_chars, colors, changes }
+}
+
+/// "@@ -12,7 +12,9 @@ fn x" with 3 more lines above -> "@@ -9,10 +9,12 @@ fn x".
+fn shift_hunk_header(line: &str, up: u32) -> String {
+    let Some(rest) = line.strip_prefix("@@ ") else { return line.to_string() };
+    let Some((ranges, tail)) = rest.split_once(" @@") else { return line.to_string() };
+    let range = |r: &str| -> String {
+        let (start, count) = r[1..].split_once(',').unwrap_or((&r[1..], "1"));
+        let (start, count): (u32, u32) = (start.parse().unwrap_or(1), count.parse().unwrap_or(1));
+        format!("{}{},{}", &r[..1], start.saturating_sub(up), count + up)
+    };
+    let shifted: Vec<String> = ranges.split(' ').map(range).collect();
+    format!("@@ {} @@{tail}", shifted.join(" "))
 }
 
 /// "@@ -12,7 +12,9 @@" -> (12, 12)
@@ -459,6 +483,13 @@ fn folders_come_first() {
 
 #[cfg(test)]
 #[test]
+fn shifts_hunk_headers() {
+    assert_eq!(shift_hunk_header("@@ -12,7 +12,9 @@ fn x", 3), "@@ -9,10 +9,12 @@ fn x");
+    assert_eq!(shift_hunk_header("@@ -0,0 +1 @@", 0), "@@ -0,0 +1,1 @@");
+}
+
+#[cfg(test)]
+#[test]
 fn marks_changed_words() {
     let (a, b) = changed_span("let timeout = 30;", "let timeout = 60;").unwrap();
     assert_eq!((&"let timeout = 30;"[a], &"let timeout = 60;"[b]), ("30", "60"));
@@ -470,6 +501,11 @@ fn marks_changed_words() {
     assert!(a.is_empty());
     assert_eq!(&"f(x, y)"[b], ", y");
     assert!(changed_span("alpha beta gamma", "something else entirely").is_none());
+    // Re-indented blocks: indentation alone doesn't make lines a pair.
+    assert!(changed_span("        },", "            {name: \"x\"}").is_none());
+    assert!(changed_span("    foo(1)", "        foo(1)").is_none());
+    let (a, b) = changed_span("    foo(1)", "        foo(2)").unwrap();
+    assert_eq!((&"    foo(1)"[a], &"        foo(2)"[b]), ("1", "2"));
 }
 
 /// "Files 38" with the button that hides the tree.
@@ -817,7 +853,7 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
                         let color = if resp.hovered() { egui::Color32::WHITE } else { p.fg_muted };
                         unfold_arrow(painter, area.center(), arrow, color);
                         let under_header = i > 0 && matches!(layout.rows[i - 1], Row::Header(..));
-                        let resp = if under_header { resp.tip(&label) } else { resp.tip_above(&label) };
+                        let resp = if under_header { resp.tip_below(&label) } else { resp.tip_above(&label) };
                         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                             app.actions.push(Action::ExpandHunk(path.clone(), key, amount));
                         }

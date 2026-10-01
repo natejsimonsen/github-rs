@@ -924,6 +924,9 @@ fn event_line(ui: &mut Ui, p: &Palette, icon: Icon, badge: Option<Color32>, who:
             if let Some(a) = who {
                 avatar(ui, &a.avatar_url, 20.0);
                 ui.label(RichText::new(&a.login).font(theme::bold(14.0)).color(p.fg));
+                if is_bot(&a.login, &a.avatar_url) {
+                    pill(ui, "bot", theme::body(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
+                }
             }
             body(ui);
         });
@@ -1476,7 +1479,7 @@ fn thread_footer(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, busy: bool
         ui.horizontal(|ui| {
             resolve_button(ui, acts);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add_enabled(!busy && !empty, primary_button("Reply", p)).clicked() {
+                if ui.add_enabled(!busy && !empty, primary_button("Comment", p)).clicked() {
                     acts.push(Action::SendReply(t.id.clone()));
                 }
                 if ui.add_enabled(!busy, button("Cancel", p)).clicked() {
@@ -1496,7 +1499,7 @@ fn thread_footer(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, busy: bool
     ui.horizontal(|ui| {
         resolve_button(ui, acts);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add_enabled(!busy && !empty, primary_button("Reply", p)).clicked() || (send && !empty) {
+            if ui.add_enabled(!busy && !empty, primary_button("Comment", p)).clicked() || (send && !empty) {
                 acts.push(Action::SendReply(t.id.clone()));
             }
             if ui.add_enabled(!busy, button("Cancel", p)).clicked() || cancel {
