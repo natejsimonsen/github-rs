@@ -320,16 +320,24 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
         pad = 14.0;
         w = widths(pad);
     }
-    // How many fit, keeping room for "More ▾" if some don't.
-    let more_w = ui.painter().layout_no_wrap("More ▾".into(), theme::bold(13.0), p.fg).size().x + pad;
-    let mut shown = SECTIONS.len();
-    while shown > 1 && w[..shown].iter().sum::<f32>() + if shown < SECTIONS.len() { more_w } else { 0.0 } > avail {
-        shown -= 1;
-    }
     let active = match app.view {
         View::Section(i) => Some(i),
         View::Search(_) => None,
     };
+    // How many fit, keeping room for the overflow button if some don't.
+    // That button carries the active section's name when it's hidden, so
+    // its width depends on how many are shown.
+    let more_w = |shown: usize| {
+        let label = match active {
+            Some(i) if i >= shown => format!("{} ▾", SECTIONS[i].title),
+            _ => "More ▾".to_string(),
+        };
+        ui.painter().layout_no_wrap(label, theme::bold(13.0), p.fg).size().x + pad
+    };
+    let mut shown = SECTIONS.len();
+    while shown > 1 && w[..shown].iter().sum::<f32>() + if shown < SECTIONS.len() { more_w(shown) } else { 0.0 } > avail {
+        shown -= 1;
+    }
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
         let n = if shown < SECTIONS.len() { shown + 1 } else { shown };

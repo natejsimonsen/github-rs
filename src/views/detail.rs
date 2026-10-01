@@ -418,7 +418,7 @@ fn merge_bar(app: &mut App, ui: &mut Ui, p: &Palette, ms: &super::MergeStatus, d
                 ui.horizontal(|ui| {
                     // 28px icon + the two gaps before the title.
                     ui.add_space(28.0 + 4.0 + ui.spacing().item_spacing.x);
-                    ui.label(RichText::new(&ms.detail).size(13.0).color(p.fg_muted));
+                    ui.add(egui::Label::new(RichText::new(&ms.detail).size(13.0).color(p.fg_muted)).wrap());
                 });
             } else if stacked {
                 ui.horizontal(status);
@@ -824,7 +824,7 @@ fn timeline(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                 // One block, like GitHub: the review's line, then its text
                 // and threads right under it, sharing that line's avatar.
                 timeline_gap(ui, p);
-                review_event(ui, p, r);
+                review_event(app, ui, p, r);
                 if !r.body.trim().is_empty() {
                     ui.add_space(8.0);
                     comment_card(
@@ -1063,10 +1063,10 @@ fn commits_row(app: &mut App, ui: &mut Ui, p: &Palette, commits: &[&EventCommit]
             let msg_w = (ui.available_width() - 90.0).max(80.0);
             let mut job = egui::text::LayoutJob::default();
             super::append_title(&mut job, &c.message_headline, 13.0, false, 0.0, p);
-            job.wrap = egui::text::TextWrapping::truncate_at_width(msg_w);
-            let g = ui.painter().layout_job(job);
-            let cut = g.elided;
+            let (g, cut) = super::cut_job(ui.painter(), job.clone(), msg_w);
             let (r, resp) = ui.allocate_exact_size(g.size(), Sense::click());
+            // Hover: blue text and underline, like a link on github.com.
+            let g = if resp.hovered() { super::cut_job(ui.painter(), recolor(job, p.fg, p.accent), msg_w).0 } else { g };
             ui.painter().galley(r.min, g, p.fg);
             if resp.hovered() {
                 ui.painter().hline(r.x_range(), r.bottom(), Stroke::new(1.0, p.accent));
@@ -1089,6 +1089,16 @@ fn commits_row(app: &mut App, ui: &mut Ui, p: &Palette, commits: &[&EventCommit]
             });
         });
     }
+}
+
+/// A copy of `job` with every `from`-colored section painted `to`.
+fn recolor(mut job: egui::text::LayoutJob, from: Color32, to: Color32) -> egui::text::LayoutJob {
+    for s in &mut job.sections {
+        if s.format.color == from {
+            s.format.color = to;
+        }
+    }
+    job
 }
 
 /// The vertical gray line that connects timeline items.
@@ -1228,7 +1238,7 @@ fn markdown(app: &mut App, ui: &mut Ui, p: &Palette, body: &str, id: &str, repo:
     }
 }
 
-fn review_event(ui: &mut Ui, p: &Palette, r: &Review) {
+fn review_event(app: &mut App, ui: &mut Ui, p: &Palette, r: &Review) {
     let (icon, badge_bg, badge_fg, verb) = match r.state.as_str() {
         "APPROVED" => (Icon::Check, p.open_emphasis, Color32::WHITE, "approved these changes"),
         "CHANGES_REQUESTED" => (Icon::FileDiff, p.closed_emphasis, Color32::WHITE, "requested changes"),
@@ -1252,6 +1262,11 @@ fn review_event(ui: &mut Ui, p: &Palette, r: &Review) {
         }
         ui.label(RichText::new(verb).color(p.fg_muted));
         ui.label(RichText::new(util::ago(r.submitted_at.as_deref().unwrap_or(""))).color(p.fg_muted));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if link_styled(ui, "View reviewed changes", theme::body(12.0), p.fg_muted).clicked() {
+                app.actions.push(Action::Tab(Tab::Files));
+            }
+        });
     });
 }
 
@@ -2237,10 +2252,9 @@ fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail, repo: &str,
                         let icon_w = if state.is_some() { 22.0 } else { 0.0 } + if has_body { 30.0 } else { 0.0 };
                         let mut job = egui::text::LayoutJob::default();
                         super::append_title(&mut job, &c.message_headline, 14.0, true, 0.0, p);
-                        job.wrap = egui::text::TextWrapping::truncate_at_width(w - icon_w);
-                        let g = ui.painter().layout_job(job);
-                        let cut = g.elided;
+                        let (g, cut) = super::cut_job(ui.painter(), job.clone(), w - icon_w);
                         let (rect, resp) = ui.allocate_exact_size(g.size(), Sense::click());
+                        let g = if resp.hovered() { super::cut_job(ui.painter(), recolor(job, p.fg, p.accent), w - icon_w).0 } else { g };
                         ui.painter().galley(rect.min, g, p.fg);
                         if resp.hovered() {
                             ui.painter().hline(rect.x_range(), rect.bottom(), Stroke::new(1.0, p.accent));
@@ -2422,9 +2436,9 @@ fn check_row(app: &mut App, ui: &mut Ui, p: &Palette, c: &Check) {
             ui.spacing_mut().item_spacing.x = 8.0;
             let (icon, color) = status_icon(&c.result, p);
             icons::show(ui, icon, 16.0, color);
-            // Skipped checks step back: faded picture, muted name.
+            // Skipped checks step back a little: a faded picture, like GitHub.
             let skipped = check_rank(&c.result) >= 3;
-            let name_color = if skipped { p.fg_muted } else { p.fg };
+            let name_color = p.fg;
             // The app's picture (Actions, CircleCI, ...).
             let (rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
             match c.avatar.as_deref().filter(|u| !u.is_empty()) {
@@ -2464,17 +2478,22 @@ fn check_row(app: &mut App, ui: &mut Ui, p: &Palette, c: &Check) {
             let mut cut = g.elided;
             let (r, resp) = ui.allocate_exact_size(g.size(), Sense::hover());
             ui.painter().galley(r.min, g, p.fg);
+            let mut note_resp = None;
             if !note.is_empty() {
                 let mut job = egui::text::LayoutJob::single_section(note.clone(), egui::TextFormat { font_id: theme::body(13.0), color: p.fg_muted, ..Default::default() });
                 job.wrap = egui::text::TextWrapping::truncate_at_width((max - r.width() - 8.0).max(40.0));
                 let g = ui.painter().layout_job(job);
                 cut |= g.elided;
-                let (r, _) = ui.allocate_exact_size(g.size(), Sense::hover());
+                let (r, nr) = ui.allocate_exact_size(g.size(), Sense::hover());
                 ui.painter().galley(r.min, g, p.fg_muted);
+                note_resp = Some(nr);
             }
             // The whole text, but only when some of it was cut.
             if cut {
                 resp.tip(format!("{name}\n{note}"));
+                if let Some(nr) = note_resp {
+                    nr.tip(format!("{name}\n{note}"));
+                }
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if let Some(u) = &c.url {

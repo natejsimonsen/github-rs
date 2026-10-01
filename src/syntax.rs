@@ -151,7 +151,14 @@ pub fn highlight(lang: &str, source: &str) -> Option<Lines> {
     // query match wins, as in tree-sitter's own highlighter.
     let mut spans = spans;
     spans.sort_by_key(|s| (s.start, std::cmp::Reverse(s.end)));
-    spans.dedup_by(|b, a| a.start == b.start && a.end == b.end);
+    spans.dedup_by(|b, a| {
+        let same = a.start == b.start && a.end == b.end;
+        // A field that's being called (Go's `t.Run`) is a function first.
+        if same && tok_for(&a.capture) == Tok::Property && tok_for(&b.capture) == Tok::Function {
+            a.capture = b.capture.clone();
+        }
+        same
+    });
     for s in &spans {
         let tok = tok_for(&s.capture);
         let (a, b) = (s.start as usize, (s.end as usize).min(source.len()));
@@ -472,4 +479,17 @@ fn colors_shell_comments() {
     assert_eq!(lines[0], vec![(0..19, Tok::Comment)]);
     assert_eq!(lines[3], vec![(0..15, Tok::Comment)]);
     assert!(lines[4].iter().any(|(_, t)| *t == Tok::Comment));
+}
+
+#[cfg(test)]
+#[test]
+fn go_method_calls_are_functions() {
+    let src = "func TestX(t *testing.T) {\n\tt.Parallel()\n\tx := cfg.Name\n}";
+    let lines = highlight("go", src).unwrap();
+    // `t.Parallel()` is a call: purple, not the field blue.
+    let at = "\tt.Parallel()".find("Parallel").unwrap();
+    assert_eq!(lines[1].iter().find(|(r, _)| r.contains(&at)).map(|(_, t)| *t), Some(Tok::Function), "{:?}", lines[1]);
+    // A plain field stays a field.
+    let at = "\tx := cfg.Name".find("Name").unwrap();
+    assert_eq!(lines[2].iter().find(|(r, _)| r.contains(&at)).map(|(_, t)| *t), Some(Tok::Property), "{:?}", lines[2]);
 }

@@ -372,9 +372,7 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
                         icons::paint(ui.painter(), Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - 7.0), vec2(14.0, 14.0)), icon, color);
                         // The highlighted row gets the Enter hint.
                         let hint_w = if on { ui.painter().layout_no_wrap("Enter to open".into(), theme::body(12.0), p.fg_muted).size().x + 16.0 } else { 0.0 };
-                        job.wrap = egui::text::TextWrapping::truncate_at_width(r.width() - 44.0 - hint_w);
-                        job.wrap.break_anywhere = true;
-                        let tg = ui.painter().layout_job(job);
+                        let (tg, _) = cut_job(ui.painter(), job, r.width() - 44.0 - hint_w);
                         ui.painter().galley(pos2(r.left() + 32.0, r.center().y - tg.size().y / 2.0), tg, p.fg);
                         if on {
                             ui.painter().text(pos2(r.right() - 8.0, r.center().y), egui::Align2::RIGHT_CENTER, "Enter to open", theme::body(12.0), p.fg_muted);
@@ -427,6 +425,40 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
     } else if resp.should_close() {
         app.goto = None;
     }
+}
+
+/// Lays `job` out on one line cut to `width`, with "…" right after the
+/// last visible character (egui's own cut can leave a space before it).
+/// Also says whether anything was cut.
+pub fn cut_job(painter: &egui::Painter, mut job: egui::text::LayoutJob, width: f32) -> (std::sync::Arc<egui::Galley>, bool) {
+    job.wrap = egui::text::TextWrapping::truncate_at_width(width);
+    job.wrap.break_anywhere = true;
+    let g = painter.layout_job(job.clone());
+    if !g.elided {
+        return (g, false);
+    }
+    // The glyphs that fit, minus the "…" and any spaces before it.
+    let fit = g.rows.first().map(|r| r.glyphs.len()).unwrap_or(0).saturating_sub(1);
+    let chars: Vec<char> = job.text.chars().collect();
+    let mut keep = fit.min(chars.len());
+    while keep > 0 && chars[keep - 1].is_whitespace() {
+        keep -= 1;
+    }
+    let end: usize = chars[..keep].iter().map(|c| c.len_utf8()).sum();
+    let mut cut = egui::text::LayoutJob::default();
+    let mut last = None;
+    for s in &job.sections {
+        let (start, stop) = (s.byte_range.start.0, s.byte_range.end.0.min(end));
+        if start >= end {
+            break;
+        }
+        cut.append(&job.text[start..stop], s.leading_space, s.format.clone());
+        last = Some(s.format.clone());
+    }
+    if let Some(f) = last {
+        cut.append("…", 0.0, f);
+    }
+    (painter.layout_job(cut), true)
 }
 
 /// Adds a PR title to `job`, drawing `code spans` in monospace on a tinted
@@ -875,7 +907,13 @@ pub fn merge_status(
             .and_then(|a| a.enabled_by.as_ref())
             .map(|a| format!(" · enabled by {}", a.login))
             .unwrap_or_default();
-        let waiting = if why.is_empty() { String::new() } else { format!(" Waiting on: {why}.") };
+        let waiting = if why.is_empty() {
+            String::new()
+        } else {
+            let mut w = why.chars();
+            let first = w.next().map(|c| c.to_lowercase().to_string()).unwrap_or_default();
+            format!(" Waiting on: {first}{}", w.as_str())
+        };
         return s(Icon::AutoMerge, p.merged, "Auto-merge on", "Auto-merge enabled", format!("GitHub will {method} when all requirements are met{by}.{waiting}"));
     }
     match merge_state.unwrap_or("UNKNOWN") {
