@@ -24,6 +24,8 @@ pub enum Msg {
     ListRows { key: String, result: github::Result<Vec<PrSummary>> },
     /// Merge status for list rows: (id, mergeStateStatus, auto-merge on).
     ListMerge { key: String, result: github::Result<Vec<(String, Option<String>, bool)>> },
+    /// The next page of a list, to add to its end.
+    ListMore { key: String, result: github::Result<ListResult> },
     Detail { id: String, result: github::Result<PrDetail>, stale: bool },
     Files { id: String, result: github::Result<Vec<FileDiff>>, stale: bool },
     Posted { id: String, result: github::Result<()>, what: &'static str },
@@ -162,6 +164,8 @@ pub enum Action {
     ClosePr,
     /// Take the selected PR out of draft.
     ReadyForReview,
+    /// Fetch the next page of the list on screen.
+    LoadMore,
     SetPreview(bool),
     /// ⌘K: open or close the "Go to pull request" box.
     ToggleGoTo,
@@ -256,6 +260,8 @@ pub struct App {
     pub thread_replies: HashMap<String, String>,
     /// Threads with a request in flight.
     pub busy_threads: HashSet<String>,
+    /// Lists fetching their next page.
+    pub loading_more: HashSet<String>,
     /// Resolved threads you expanded.
     pub open_threads: HashSet<String>,
     pub emojis: Arc<crate::gfm::Emojis>,
@@ -344,6 +350,7 @@ impl App {
             focus_composer: false,
             thread_replies: HashMap::new(),
             busy_threads: HashSet::new(),
+            loading_more: HashSet::new(),
             open_threads: HashSet::new(),
             emojis: Arc::new(cache::load("emojis").map(crate::gfm::Emojis::new).unwrap_or_default()),
             md_text: HashMap::new(),
@@ -391,6 +398,37 @@ impl App {
         app
     }
 
+    /// The next page of the list on screen, added to its end.
+    fn load_more(&mut self) {
+        let view = self.view.clone();
+        let key = self.list_key(&view);
+        let Some(after) = self.lists.get(&key).and_then(|l| l.data.as_ref()).and_then(|d| d.next.clone()) else { return };
+        if !self.loading_more.insert(key.clone()) {
+            return;
+        }
+        let closed = self.closed;
+        let ctx = self.ctx.clone();
+        self.spawn(move |c, tx| {
+            let result = c.search(view.query(), closed, github::MORE_SIZE, Some(&after)).and_then(|(rows, next)| {
+                let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
+                let page = c.enrich(view.query(), rows).map(|l| ListResult { next, ..l });
+                Ok((page?, ids))
+            });
+            match result {
+                Ok((page, ids)) => {
+                    let _ = tx.send(Msg::ListMore { key: key.clone(), result: Ok(page) });
+                    ctx.request_repaint();
+                    let result = c.merge_states(&ids);
+                    let _ = tx.send(Msg::ListMerge { key, result });
+                }
+                Err(e) => {
+                    let _ = tx.send(Msg::ListMore { key, result: Err(e) });
+                }
+            }
+            ctx.request_repaint();
+        });
+    }
+
     pub fn list_key(&self, view: &View) -> String {
         // `state_fits` reads the open/closed half back out of this.
         format!("list-{}-{}", self.closed, view.query())
@@ -418,6 +456,8 @@ impl App {
         }
         entry.loading = true;
         let first_time = entry.data.is_none();
+        // A refresh keeps the pages you've already loaded.
+        let first = entry.data.as_ref().map_or(github::LIST_SIZE, |d| d.rows.len()).clamp(github::LIST_SIZE, 100);
         let closed = self.closed;
         let ctx = self.ctx.clone();
         self.spawn(move |c, tx| {
@@ -427,8 +467,8 @@ impl App {
                     ctx.request_repaint();
                 }
             }
-            let rows = match c.search(view.query(), closed) {
-                Ok(rows) => rows,
+            let (rows, next) = match c.search(view.query(), closed, first, None) {
+                Ok(page) => page,
                 Err(e) => {
                     let _ = tx.send(Msg::List { key, result: Err(e), stale: false });
                     return;
@@ -445,7 +485,7 @@ impl App {
                     let _ = tx.send(Msg::ListMerge { key: key.clone(), result });
                     ctx.request_repaint();
                 });
-                let result = c.enrich(view.query(), rows);
+                let result = c.enrich(view.query(), rows).map(|l| ListResult { next, ..l });
                 let _ = tx.send(Msg::List { key: key.clone(), result, stale: false });
                 ctx.request_repaint();
             });
@@ -572,6 +612,7 @@ impl App {
                 Msg::Viewer(_) => ("viewer", false),
                 Msg::List { stale, .. } => ("list", *stale),
                 Msg::ListRows { .. } => ("list rows", false),
+                Msg::ListMore { .. } => ("more rows", false),
                 Msg::ListMerge { .. } => ("list merge", false),
                 Msg::Detail { stale, .. } => ("detail", *stale),
                 Msg::Files { stale, .. } => ("files", *stale),
@@ -635,6 +676,16 @@ impl App {
                     }
                 }
                 let rows = entry.data.clone();
+                // The open and closed lists share one pair of totals, so the
+                // counts don't change when you switch between them.
+                if let Some(d) = rows.as_ref().filter(|_| !stale) {
+                    let other = key.replacen("list-false-", "list-true-", 1);
+                    let other = if other == key { key.replacen("list-true-", "list-false-", 1) } else { other };
+                    if let Some(data) = self.lists.get_mut(&other).and_then(|e| e.data.as_mut()) {
+                        let data = Arc::make_mut(data);
+                        (data.open, data.closed) = (d.open, d.closed);
+                    }
+                }
                 if !stale && key == self.list_key(&self.view) {
                     if let Some(r) = rows {
                         self.prefetch(&r.rows);
@@ -668,10 +719,31 @@ impl App {
                         }
                     }
                 }
-                entry.data = Some(Arc::new(ListResult { open, closed, rows: rows.clone() }));
+                let next = entry.data.as_ref().and_then(|d| d.next.clone());
+                entry.data = Some(Arc::new(ListResult { open, closed, rows: rows.clone(), next }));
                 if key == self.list_key(&self.view) {
                     self.prefetch(&rows);
                 }
+            }
+            Msg::ListMore { key, result } => {
+                self.loading_more.remove(&key);
+                let page = match result {
+                    Ok(page) => page,
+                    Err(e) => {
+                        self.on_error(&e);
+                        return;
+                    }
+                };
+                let Some(data) = self.lists.get_mut(&key).and_then(|e| e.data.as_mut()) else { return };
+                let data = Arc::make_mut(data);
+                for r in page.rows {
+                    if state_fits(&key, &r.state) && !data.rows.iter().any(|o| o.id == r.id) {
+                        data.rows.push(r);
+                    }
+                }
+                (data.open, data.closed, data.next) = (page.open, page.closed, page.next);
+                let d = data.clone();
+                std::thread::spawn(move || cache::store(&key, &d));
             }
             Msg::ListMerge { key, result } => {
                 let Ok(states) = result else { return };
@@ -1060,6 +1132,7 @@ impl App {
                 self.closed = closed;
                 self.apply(Action::SetView(view), ctx);
             }
+            Action::LoadMore => self.load_more(),
             Action::ReadyForReview => {
                 self.merge_action("Marked ready for review", |c, d| c.ready_for_review(&d.id));
             }
@@ -1173,6 +1246,10 @@ impl App {
             return;
         }
         let cur = self.selected.as_ref().and_then(|s| rows.rows.iter().position(|r| r.id == s.id));
+        // j on the last row fetches the next page.
+        if delta > 0 && cur == Some(rows.rows.len() - 1) && rows.next.is_some() {
+            self.actions.push(Action::LoadMore);
+        }
         let next = match cur {
             Some(i) => (i as i64 + delta).clamp(0, rows.rows.len() as i64 - 1) as usize,
             None => 0,

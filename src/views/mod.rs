@@ -222,19 +222,19 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
     let parsed = crate::util::parse_pr_ref(&typed, default_repo.as_deref());
     if bare {
         // Loaded PRs with that number first (the default repo is only a
-        // guess), then the guess, then numbers that start with it.
+        // guess), then numbers that start with it, then the guess.
         let n: u64 = digits.parse().unwrap_or(0);
         for pr in loaded.iter().filter(|p| p.number == n) {
             results.push(GoResult::Pr((*pr).clone()));
         }
+        for pr in loaded.iter().filter(|p| p.number != n && p.number.to_string().starts_with(digits)).take(5) {
+            results.push(GoResult::Pr((*pr).clone()));
+        }
         if let Some((repo, n)) = parsed.clone() {
-            let known = results.iter().any(|r| matches!(r, GoResult::Pr(p) if p.repository.name_with_owner.eq_ignore_ascii_case(&repo)));
+            let known = results.iter().any(|r| matches!(r, GoResult::Pr(p) if p.number == n && p.repository.name_with_owner.eq_ignore_ascii_case(&repo)));
             if !known {
                 results.push(GoResult::Ref(repo, n));
             }
-        }
-        for pr in loaded.iter().filter(|p| p.number != n && p.number.to_string().starts_with(digits)) {
-            results.push(GoResult::Pr((*pr).clone()));
         }
     } else if let Some((repo, n)) = parsed {
         // A ref or link: the loaded PR if we have it, else fetch it.
@@ -363,7 +363,7 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
                         };
                         icons::paint(ui.painter(), Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - 7.0), vec2(14.0, 14.0)), icon, color);
                         // The highlighted row gets the Enter hint.
-                        let hint_w = if on { 100.0 } else { 0.0 };
+                        let hint_w = if on { ui.painter().layout_no_wrap("Enter to open".into(), theme::body(12.0), p.fg_muted).size().x + 16.0 } else { 0.0 };
                         job.wrap = egui::text::TextWrapping::truncate_at_width(r.width() - 44.0 - hint_w);
                         let tg = ui.painter().layout_job(job);
                         ui.painter().galley(pos2(r.left() + 32.0, r.center().y - tg.size().y / 2.0), tg, p.fg);

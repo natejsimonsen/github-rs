@@ -1161,17 +1161,28 @@ impl Render {
             }
         }
         let avail = ui.available_width() - cols as f32 * 2.0 * pad_x - 1.0;
-        let (sum_min, sum_max) = (min_w.iter().sum::<f32>(), max_w.iter().sum::<f32>());
-        let t = if sum_max <= avail {
+        // Short columns ("✔️ Pass") keep their whole width when squeezed;
+        // only the long ones wrap, like in a browser.
+        let short: Vec<bool> = if max_w.iter().sum::<f32>() <= avail {
+            vec![false; cols]
+        } else {
+            max_w.iter().map(|&w| w <= avail / cols as f32).collect()
+        };
+        let fixed: f32 = (0..cols).filter(|&c| short[c]).map(|c| max_w[c]).sum();
+        let (sum_min, sum_max) = (0..cols).filter(|&c| !short[c]).fold((0.0, 0.0), |(a, b), c| (a + min_w[c], b + max_w[c]));
+        let room = avail - fixed;
+        let t = if sum_max <= room {
             1.0
         } else if sum_max > sum_min {
-            ((avail - sum_min) / (sum_max - sum_min)).clamp(0.0, 1.0)
+            ((room - sum_min) / (sum_max - sum_min)).clamp(0.0, 1.0)
         } else {
             0.0
         };
         // Rounded down when squeezed, so the table never ends a few px too wide.
         let round = |w: f32| if t < 1.0 { w.floor() } else { w.ceil() };
-        let widths: Vec<f32> = (0..cols).map(|c| round(min_w[c] + (max_w[c] - min_w[c]) * t) + 2.0 * pad_x).collect();
+        let widths: Vec<f32> = (0..cols)
+            .map(|c| if short[c] { max_w[c].ceil() } else { round(min_w[c] + (max_w[c] - min_w[c]) * t) } + 2.0 * pad_x)
+            .collect();
 
         // Lay out every cell at its column width.
         let mut cells = Vec::with_capacity(rows.len());

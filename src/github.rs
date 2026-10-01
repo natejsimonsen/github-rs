@@ -453,8 +453,10 @@ pub struct Section {
     pub query: &'static str,
 }
 
-/// Rows per list. Small on purpose: GitHub search time grows with row count.
+/// Rows per page. Small on purpose: GitHub search time grows with row count.
 pub const LIST_SIZE: usize = 10;
+/// Rows per "Load more", like a page on github.com.
+pub const MORE_SIZE: usize = 25;
 
 pub const SECTIONS: &[Section] = &[
     Section { title: "Created", query: "author:@me" },
@@ -469,6 +471,9 @@ pub struct ListResult {
     pub open: u64,
     pub closed: u64,
     pub rows: Vec<PrSummary>,
+    /// Where the next page starts, if there is one.
+    #[serde(default)]
+    pub next: Option<String>,
 }
 
 /// Fields for the first, fast pass over a list. Every extra field makes
@@ -487,7 +492,7 @@ const EXTRA_FIELDS: &str = "
     comments { totalCount }
     assignees(first: 3) { nodes { login avatarUrl(size: 64) } }
     reviewDecision
-    labels(first: 6) { nodes { name color } }
+    labels(first: 20) { nodes { name color } }
     commits(last: 1) { nodes { commit { statusCheckRollup { state contexts(first: 100) { pageInfo { hasNextPage } nodes {
       __typename ... on CheckRun { name status conclusion } ... on StatusContext { context state }
     } } } } } }";
@@ -608,12 +613,18 @@ impl Client {
     }
 
     /// Step 1 of loading a list: a lean search so rows show up fast.
-    pub fn search(&self, query: &str, closed: bool) -> Result<Vec<PrSummary>> {
+    /// `first` rows, starting after the cursor `after`. Also returns the
+    /// cursor for the page after these, if there is one.
+    pub fn search(&self, query: &str, closed: bool, first: usize, after: Option<&str>) -> Result<(Vec<PrSummary>, Option<String>)> {
         let q = format!(
-            "query($q: String!) {{ search(query: $q, type: ISSUE, first: {LIST_SIZE}) {{ {FAST_FIELDS} }} }}"
+            "query($q: String!, $after: String) {{ search(query: $q, type: ISSUE, first: {}, after: $after) {{
+              pageInfo {{ hasNextPage endCursor }} {FAST_FIELDS} }} }}",
+            first.clamp(1, 100)
         );
-        let data = self.graphql_checked(&q, json!({ "q": full_query(query, closed) }))?;
-        Ok(parse_search(&data["search"]).1)
+        let data = self.graphql_checked(&q, json!({ "q": full_query(query, closed), "after": after }))?;
+        let page = &data["search"]["pageInfo"];
+        let next = (page["hasNextPage"] == true).then(|| page["endCursor"].as_str().map(str::to_string)).flatten();
+        Ok((parse_search(&data["search"]).1, next))
     }
 
     /// Step 2: avatars, labels, comment counts and CI status for those rows
@@ -647,6 +658,7 @@ impl Client {
             open: data["open"]["issueCount"].as_u64().unwrap_or(0),
             closed: data["closed"]["issueCount"].as_u64().unwrap_or(0),
             rows,
+            next: None,
         })
     }
 

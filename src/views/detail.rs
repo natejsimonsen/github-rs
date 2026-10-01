@@ -28,10 +28,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             if empty {
                 // The list already says why it's empty; just point the way out.
                 ui.label(RichText::new("No pull request selected").font(theme::bold(20.0)));
-                ui.label(RichText::new("⌘K opens any pull request by number or link.").color(p.fg_muted).size(13.0));
+                ui.label(RichText::new(EMPTY_HINT).color(p.fg_muted).size(13.0));
             } else {
                 ui.label(RichText::new("No pull request selected").font(theme::bold(20.0)));
-                ui.label(RichText::new("j / k move through the list · ⌘K go to any pull request · ⌘O open on GitHub").color(p.fg_muted).size(13.0));
+                ui.label(RichText::new(EMPTY_HINT).color(p.fg_muted).size(13.0));
             }
         });
         return;
@@ -156,6 +156,9 @@ fn header(app: &mut App, ui: &mut Ui, p: &Palette, sel: &PrSummary, d: Option<&P
 
 /// Once you scroll into a PR: one line with its state and title, so the
 /// page keeps most of the window (GitHub's sticky header).
+/// Under "No pull request selected", with or without PRs in the list.
+const EMPTY_HINT: &str = "⌘K go to any pull request · j / k move through the list";
+
 fn slim_header(ui: &mut Ui, p: &Palette, sel: &PrSummary, d: Option<&PrDetail>) {
     let state = d.map(|d| d.state.as_str()).unwrap_or(&sel.state);
     let draft = d.map(|d| d.is_draft).unwrap_or(sel.is_draft);
@@ -774,7 +777,7 @@ fn timeline(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
         match (grouped.last_mut(), item) {
             (Some(Item::Commits(run)), Item::Commits(more)) => run.extend(more),
             (Some(Item::Events(run)), Item::Events(more))
-                if is_label(run[0]) && is_label(more[0]) && same_actor(run[0], more[0]) =>
+                if (is_label(run[0]) && is_label(more[0]) || is_request(run[0]) && is_request(more[0])) && same_actor(run[0], more[0]) =>
             {
                 run.extend(more)
             }
@@ -879,6 +882,10 @@ fn is_label(e: &Event) -> bool {
     matches!(e.kind.as_str(), "LabeledEvent" | "UnlabeledEvent")
 }
 
+fn is_request(e: &Event) -> bool {
+    e.kind == "ReviewRequestedEvent"
+}
+
 fn same_actor(a: &Event, b: &Event) -> bool {
     a.actor.as_ref().map(|x| &x.login) == b.actor.as_ref().map(|x| &x.login)
 }
@@ -957,14 +964,29 @@ fn event_row(app: &mut App, ui: &mut Ui, p: &Palette, events: &[&Event], repo: &
         }),
         "ReadyForReviewEvent" => event_line(ui, p, Icon::Eye, None, who, |ui| muted(ui, &format!("marked this pull request as ready for review {ago}"))),
         "ConvertToDraftEvent" => event_line(ui, p, Icon::PrDraft, None, who, |ui| muted(ui, &format!("marked this pull request as draft {ago}"))),
+        // Requests made together read as one line: "requested review from
+        // a, b and c".
         "ReviewRequestedEvent" => event_line(ui, p, Icon::Eye, None, who, |ui| {
-            let name = match &e.requested_reviewer {
-                Some(Reviewer::User { login, .. }) => login.clone(),
-                Some(Reviewer::Team { name }) => name.clone(),
-                _ => "someone".into(),
-            };
-            muted(ui, "requested a review from");
-            ui.label(RichText::new(name).font(theme::bold(14.0)).color(p.fg));
+            let mut names: Vec<String> = Vec::new();
+            for e in events {
+                let name = match &e.requested_reviewer {
+                    Some(Reviewer::User { login, .. }) => login.clone(),
+                    Some(Reviewer::Team { name }) => name.clone(),
+                    _ => "someone".into(),
+                };
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+            muted(ui, if names.len() == 1 { "requested a review from" } else { "requested review from" });
+            let n = names.len();
+            for (i, name) in names.iter().enumerate() {
+                let sep = if i + 2 < n { "," } else { "" };
+                ui.label(RichText::new(format!("{name}{sep}")).font(theme::bold(14.0)).color(p.fg));
+                if i + 2 == n {
+                    muted(ui, "and");
+                }
+            }
             muted(ui, &ago);
         }),
         "AssignedEvent" => event_line(ui, p, Icon::Person, None, who, |ui| {
@@ -1102,7 +1124,19 @@ fn comment_card(
                         let text_w = (ui.available_width() - 40.0 - author_w - if bot { 40.0 } else { 0.0 }).max(60.0);
                         let mut job = egui::text::LayoutJob::default();
                         job.append(login, 0.0, egui::TextFormat { font_id: theme::bold(14.0), color: p.fg, ..Default::default() });
-                        job.append(verb, 4.0, egui::TextFormat { font_id: theme::body(14.0), color: p.fg_muted, ..Default::default() });
+                        // "github-actions [bot] commented …": the badge goes
+                        // right after the name, so the text is drawn in two parts.
+                        if bot {
+                            let g = ui.painter().layout_job(std::mem::take(&mut job));
+                            let (r, resp) = ui.allocate_exact_size(g.size(), Sense::click());
+                            ui.painter().galley(r.min, g, p.fg);
+                            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                                open_link = true;
+                            }
+                            pill(ui, "bot", theme::body(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
+                        }
+                        let text_w = if bot { (ui.available_width() - 40.0 - author_w).max(60.0) } else { text_w };
+                        job.append(verb, if bot { 0.0 } else { 4.0 }, egui::TextFormat { font_id: theme::body(14.0), color: p.fg_muted, ..Default::default() });
                         job.append(&util::ago(time), 4.0, egui::TextFormat { font_id: theme::body(14.0), color: p.fg_muted, ..Default::default() });
                         job.wrap = egui::text::TextWrapping::truncate_at_width(text_w);
                         let g = ui.painter().layout_job(job);
@@ -1113,10 +1147,6 @@ fn comment_card(
                         }
                         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).tip(format!("{login} {verb} {} · open on GitHub", util::ago(time))).clicked() {
                             open_link = true;
-                        }
-                        if bot {
-                            ui.add_space(4.0);
-                            pill(ui, "bot", theme::body(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 4.0;
@@ -1585,7 +1615,7 @@ fn merge_box(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                 lines.push(Line { icon: Icon::Comment, color: p.closed, title, detail: "Conversations must be resolved before merging.".into(), goto: None });
             }
             if d.is_draft {
-                lines.push(Line { icon: Icon::PrDraft, color: p.neutral, title: "This pull request is still a work in progress".into(), detail: "Draft pull requests cannot be merged.".into(), goto: None });
+                lines.push(Line { icon: Icon::PrDraft, color: p.neutral_emphasis, title: "This pull request is still a work in progress".into(), detail: "Draft pull requests cannot be merged.".into(), goto: None });
             } else {
                 match d.mergeable.as_str() {
                     "MERGEABLE" => lines.push(Line { icon: Icon::Check, color: p.open, title: "No conflicts with base branch".into(), detail: "Merging can be performed automatically.".into(), goto: None }),

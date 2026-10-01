@@ -665,7 +665,7 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
         // Whenever the tree isn't showing, its button is.
         let shown = if app.tree_narrow { app.tree_open_narrow } else { app.panels.tree };
         if !shown {
-            *toggle |= crate::views::icon_button(ui, Icon::SidebarLeftOpen, "Show file tree (⇧⌘B)", p).clicked();
+            *toggle |= crate::views::icon_button_tip_above(ui, Icon::SidebarLeftOpen, "Show file tree (⇧⌘B)", p).clicked();
         }
         let summary = format!(
             "Showing {} changed file{} with {adds} addition{} and {dels} deletion{}.",

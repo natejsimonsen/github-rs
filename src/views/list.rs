@@ -153,6 +153,23 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     row_separator(ui);
                 }
             }
+            // More pages: "Showing 10 of 809" and a button for the next 25.
+            if let Some(d) = data.as_ref().filter(|d| d.next.is_some()) {
+                row_separator(ui);
+                let total = if app.closed { d.closed } else { d.open };
+                let busy = app.loading_more.contains(&app.list_key(&app.view));
+                ui.add_space(12.0);
+                ui.vertical_centered(|ui| {
+                    if busy {
+                        ui.add(egui::Spinner::new().size(16.0));
+                    } else if ui.add(super::button("Load more", p)).clicked() {
+                        app.actions.push(Action::LoadMore);
+                    }
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(format!("Showing {} of {total}", rows.len())).size(12.0).color(p.fg_muted));
+                });
+                ui.add_space(16.0);
+            }
         });
     });
     if retry {
@@ -223,8 +240,8 @@ pub fn rail(app: &mut App, ui: &mut Ui) {
                 ui.painter().circle(rect.right_bottom() - vec2(8.0, 8.0), 4.0, ms.color, Stroke::new(1.5, p.canvas_subtle));
             }
             let tip = match &status {
-                Some(ms) => format!("#{} {}\n{}", pr.number, pr.title, ms.short),
-                None => format!("#{} {}", pr.number, pr.title),
+                Some(ms) => format!("{}#{} {}\n{}", pr.repository.name_with_owner, pr.number, pr.title, ms.short),
+                None => format!("{}#{} {}", pr.repository.name_with_owner, pr.number, pr.title),
             };
             super::tip(&resp, &tip);
             let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
