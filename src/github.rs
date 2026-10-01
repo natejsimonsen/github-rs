@@ -327,6 +327,14 @@ pub struct EventCommit {
     #[serde(default)]
     pub committed_date: String,
     pub author: Option<CommitAuthor>,
+    /// Overall CI state (SUCCESS, FAILURE, PENDING, ...), if any ran.
+    #[serde(default)]
+    pub status_check_rollup: Option<RollupState>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct RollupState {
+    pub state: String,
 }
 
 /// A CI check. GitHub has two kinds (check runs and legacy statuses); both
@@ -765,7 +773,7 @@ query($id: ID!) { node(id: $id) { ... on PullRequest {
     ... on AutoMergeEnabledEvent { createdAt actor { login avatarUrl(size: 40) } }
     ... on AutoMergeDisabledEvent { createdAt actor { login avatarUrl(size: 40) } }
     ... on PullRequestCommit { commit { oid abbreviatedOid messageHeadline committedDate
-      author { name user { login avatarUrl(size: 40) } } } }
+      statusCheckRollup { state } author { name user { login avatarUrl(size: 40) } } } }
   } }
   head: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
     __typename

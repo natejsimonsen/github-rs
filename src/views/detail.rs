@@ -387,7 +387,10 @@ fn merge_bar(app: &mut App, ui: &mut Ui, p: &Palette, ms: &super::MergeStatus, d
             // buttons, the buttons move down (GitHub always says why).
             let reason_w = 36.0 + title_w + 8.0 + measure(&ms.detail, theme::body(13.0));
             let stacked = avail < 36.0 + title_w + 80.0 + controls_w || (!ms.detail.is_empty() && reason_w + 16.0 + controls_w > avail);
-            let reason_fits = reason_w + if stacked { 0.0 } else { 16.0 + controls_w } <= avail;
+            // The buttons fit beside the title alone: the reason goes under
+            // the title instead of the buttons under everything.
+            let reason_below = stacked && !ms.detail.is_empty() && 36.0 + title_w + 16.0 + controls_w <= avail;
+            let reason_fits = !reason_below && reason_w + if stacked { 0.0 } else { 16.0 + controls_w } <= avail;
             let status = |ui: &mut Ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::hover());
                 ui.painter().circle_filled(rect.center(), 14.0, ms.color);
@@ -409,7 +412,13 @@ fn merge_bar(app: &mut App, ui: &mut Ui, p: &Palette, ms: &super::MergeStatus, d
                     }
                 }
             };
-            if stacked {
+            if reason_below {
+                egui::Sides::new().shrink_left().show(ui, status, controls);
+                ui.horizontal(|ui| {
+                    ui.add_space(36.0);
+                    ui.label(RichText::new(&ms.detail).size(13.0).color(p.fg_muted));
+                });
+            } else if stacked {
                 ui.horizontal(status);
                 ui.add_space(6.0);
                 // Only as tall as the buttons (a bare layout here would fill
@@ -516,7 +525,7 @@ fn split_button(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail, label: &s
     let label_color = if ready { Color32::WHITE } else { p.fg_muted.gamma_multiply(0.75) };
     painter.text(main_rect.center(), egui::Align2::CENTER_CENTER, label, theme::bold(14.0), label_color);
     let c = caret_rect.center();
-    let caret_color = if ready { Color32::WHITE } else { p.fg };
+    let caret_color = if ready { Color32::WHITE } else { p.fg_muted.gamma_multiply(0.75) };
     painter.add(egui::Shape::convex_polygon(vec![pos2(c.x - 4.0, c.y - 2.0), pos2(c.x + 4.0, c.y - 2.0), pos2(c.x, c.y + 2.5)], caret_color, Stroke::NONE));
     if ready {
         let main = main.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -1055,6 +1064,15 @@ fn commits_row(app: &mut App, ui: &mut Ui, p: &Palette, commits: &[&EventCommit]
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 sha_link(app, ui, p, repo, c);
+                if let Some(r) = &c.status_check_rollup {
+                    let (icon, color) = status_icon(&r.state, p);
+                    icons::show(ui, icon, 14.0, color).tip(match r.state.as_str() {
+                        "SUCCESS" => "All checks passed",
+                        "FAILURE" | "ERROR" => "Some checks failed",
+                        "PENDING" | "EXPECTED" => "Checks are running",
+                        _ => "Checks",
+                    });
+                }
             });
         });
     }
@@ -1521,6 +1539,12 @@ fn diff_tail(ui: &mut Ui, p: &Palette, hunk: &str, path: &str) {
         crate::syntax::highlight_fragment(lang, &lines.iter().map(String::as_str).collect::<Vec<_>>())
     });
     let num_w = 44.0;
+    // Long lines scroll sideways, like GitHub; the numbers scroll with them.
+    let widest = tail.iter().map(|(_, _, l)| ui.painter().layout_no_wrap(code(l), theme::mono(12.0), p.fg).size().x).fold(0.0, f32::max);
+    let row_w = ui.available_width().max(num_w * 2.0 + 10.0 + 14.0 + widest + 16.0);
+    let scroll_id = ui.id().with(("snippet", hunk.len(), path));
+    egui::ScrollArea::horizontal().id_salt(scroll_id).auto_shrink([false, true]).scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded).show(ui, |ui| {
+    ui.spacing_mut().item_spacing.y = 0.0;
     for (k, (o, n, l)) in tail.iter().enumerate() {
         let (bg, num_bg) = match l.chars().next() {
             Some('+') => (p.diff_add, p.diff_add_num),
@@ -1528,7 +1552,7 @@ fn diff_tail(ui: &mut Ui, p: &Palette, hunk: &str, path: &str) {
             Some('@') => (p.diff_hunk, p.diff_hunk_num),
             _ => (p.canvas, p.canvas),
         };
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 20.0), Sense::hover());
+        let (rect, _) = ui.allocate_exact_size(vec2(row_w, 20.0), Sense::hover());
         let painter = ui.painter().with_clip_rect(rect);
         painter.rect_filled(rect, 0.0, bg);
         painter.rect_filled(Rect::from_min_size(rect.min, vec2(num_w * 2.0, 20.0)), 0.0, num_bg);
@@ -1549,6 +1573,7 @@ fn diff_tail(ui: &mut Ui, p: &Palette, hunk: &str, path: &str) {
         let g = painter.layout_job(crate::syntax::job(&text, runs, theme::mono(12.0), p.fg, p));
         painter.galley(pos2(x + 14.0, rect.center().y - g.size().y / 2.0), g, p.fg);
     }
+    });
 }
 
 /// The status box at the bottom: reviews, checks, and whether it can merge.
@@ -2107,7 +2132,9 @@ fn sidebar(ui: &mut Ui, p: &Palette, d: &PrDetail) {
             ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
             // Wrapped rows are otherwise a full button height apart.
             ui.spacing_mut().interact_size.y = 0.0;
-            for l in &d.labels.nodes {
+            let mut labels: Vec<&_> = d.labels.nodes.iter().collect();
+            labels.sort_by_key(|l| l.name.to_lowercase());
+            for l in labels {
                 let (bg, fg, border) = theme::label_colors(&l.color, p);
                 pill(ui, &l.name, theme::bold(13.0), bg, fg, border);
             }
@@ -2254,8 +2281,10 @@ fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail, repo: &str,
                 }
                 if verified {
                     ui.add_space(4.0);
-                    pill(ui, "Verified", theme::bold(12.0), Color32::TRANSPARENT, p.open, p.open.gamma_multiply(0.6))
-                        .tip("This commit was signed with a verified signature.");
+                    ui.allocate_ui_with_layout(vec2(70.0, 32.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        pill(ui, "Verified", theme::bold(12.0), Color32::TRANSPARENT, p.open, p.open.gamma_multiply(0.6))
+                            .tip("This commit was signed with a verified signature.");
+                    });
                 }
             });
         });

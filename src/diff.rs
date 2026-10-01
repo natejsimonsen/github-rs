@@ -245,7 +245,10 @@ pub fn build(files: Arc<Vec<FileDiff>>, is_collapsed: impl Fn(&FileDiff) -> bool
                 for raw in patch.lines() {
                     lines += 1;
                     let text = raw.replace('\t', "    ");
-                    file_chars[i] = file_chars[i].max(text.chars().count());
+                    // Hunk headers are cut with "…", so they never need scrolling.
+                    if !raw.starts_with("@@") {
+                        file_chars[i] = file_chars[i].max(text.chars().count());
+                    }
                     let row = if raw.starts_with("@@") {
                         (old, new) = hunk_start(raw);
                         let gap = new.saturating_sub(last_new + 1);

@@ -21,7 +21,7 @@ pub enum Msg {
     Viewer(github::Result<String>),
     List { key: String, result: github::Result<ListResult>, stale: bool },
     /// Fast first pass of a list: rows without labels, avatars or CI yet.
-    ListRows { key: String, result: github::Result<Vec<PrSummary>> },
+    ListRows { key: String, result: github::Result<(Vec<PrSummary>, Option<String>)> },
     /// Merge status for list rows: (id, mergeStateStatus, auto-merge on).
     ListMerge { key: String, result: github::Result<Vec<(String, Option<String>, bool)>> },
     /// The next page of a list, to add to its end.
@@ -262,6 +262,8 @@ pub struct App {
     pub busy_threads: HashSet<String>,
     /// Lists fetching their next page.
     pub loading_more: HashSet<String>,
+    /// j was pressed on the last row: step onto the next page when it lands.
+    advance_on_more: bool,
     /// Resolved threads you expanded.
     pub open_threads: HashSet<String>,
     pub emojis: Arc<crate::gfm::Emojis>,
@@ -351,6 +353,7 @@ impl App {
             thread_replies: HashMap::new(),
             busy_threads: HashSet::new(),
             loading_more: HashSet::new(),
+            advance_on_more: false,
             open_threads: HashSet::new(),
             emojis: Arc::new(cache::load("emojis").map(crate::gfm::Emojis::new).unwrap_or_default()),
             md_text: HashMap::new(),
@@ -474,7 +477,7 @@ impl App {
                     return;
                 }
             };
-            let _ = tx.send(Msg::ListRows { key: key.clone(), result: Ok(rows.clone()) });
+            let _ = tx.send(Msg::ListRows { key: key.clone(), result: Ok((rows.clone(), next.clone())) });
             ctx.request_repaint();
             let ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
             // Merge status is slow, so fetch it alongside the other extras
@@ -698,7 +701,7 @@ impl App {
                 }
             }
             Msg::ListRows { key, result } => {
-                let Ok(mut rows) = result else { return };
+                let Ok((mut rows, next)) = result else { return };
                 rows.retain(|r| state_fits(&key, &r.state));
                 let entry = self.lists.entry(key.clone()).or_default();
                 // Keep labels, avatars and CI we already have for these PRs,
@@ -719,7 +722,6 @@ impl App {
                         }
                     }
                 }
-                let next = entry.data.as_ref().and_then(|d| d.next.clone());
                 entry.data = Some(Arc::new(ListResult { open, closed, rows: rows.clone(), next }));
                 if key == self.list_key(&self.view) {
                     self.prefetch(&rows);
@@ -743,7 +745,11 @@ impl App {
                 }
                 (data.open, data.closed, data.next) = (page.open, page.closed, page.next);
                 let d = data.clone();
+                let current = key == self.list_key(&self.view);
                 std::thread::spawn(move || cache::store(&key, &d));
+                if std::mem::take(&mut self.advance_on_more) && current {
+                    self.move_selection(1);
+                }
             }
             Msg::ListMerge { key, result } => {
                 let Ok(states) = result else { return };
@@ -1249,6 +1255,7 @@ impl App {
         // j on the last row fetches the next page.
         if delta > 0 && cur == Some(rows.rows.len() - 1) && rows.next.is_some() {
             self.actions.push(Action::LoadMore);
+            self.advance_on_more = true;
         }
         let next = match cur {
             Some(i) => (i as i64 + delta).clamp(0, rows.rows.len() as i64 - 1) as usize,

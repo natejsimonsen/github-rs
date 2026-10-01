@@ -33,7 +33,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
                     // Counts are unknown until the list loads: "– Open", not "0 Open".
-                    let counts = data.as_ref().map(|d| (d.open.to_string(), d.closed.to_string()));
+                    // Both lists share one pair, so the other one's will do.
+                    let other = app.lists.get(&format!("list-{}-{}", !app.closed, app.view.query())).and_then(|l| l.data.as_ref());
+                    let counts = data.as_ref().map(|d| (d.open, d.closed)).or_else(|| other.map(|d| (d.open, d.closed)));
+                    let counts = counts.map(|(o, c)| (o.to_string(), c.to_string()));
                     let (open, closed) = counts.unwrap_or(("–".into(), "–".into()));
                     for (is_closed, icon, n, word) in [(false, Icon::PrOpen, open, "Open"), (true, Icon::Check, closed, "Closed")] {
                         let active = app.closed == is_closed;
@@ -218,9 +221,20 @@ pub fn rail(app: &mut App, ui: &mut Ui) {
         let y = ui.cursor().top();
         ui.painter().hline(rect.x_range(), y, Stroke::new(1.0, p.border));
         ui.add_space(6.0);
+        let more = app.current_list().and_then(|l| l.data.as_ref()).filter(|d| d.next.is_some()).map(|d| if app.closed { d.closed } else { d.open });
+        let busy = app.loading_more.contains(&app.list_key(&app.view));
+        let shown_id = egui::Id::new("rail-shown-selection");
+        let shown: Option<String> = ui.ctx().data(|d| d.get_temp(shown_id));
+        egui::ScrollArea::vertical().id_salt("pr-rail").scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 4.0;
         for pr in &rows {
             let selected = app.selected.as_ref().is_some_and(|s| s.id == pr.id);
             let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
+            // A new selection (keys, ⌘K) scrolls into view, once.
+            if selected && shown.as_deref() != Some(pr.id.as_str()) {
+                resp.scroll_to_me(None);
+                ui.ctx().data_mut(|d| d.insert_temp(shown_id, pr.id.clone()));
+            }
             resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, format!("#{} {}", pr.number, pr.title)));
             if selected {
                 ui.painter().rect_filled(rect, 6.0, p.selected_row);
@@ -249,6 +263,26 @@ pub fn rail(app: &mut App, ui: &mut Ui) {
                 app.actions.push(Action::Select(pr.clone()));
             }
         }
+        // More pages: "+N" loads the next one.
+        if let Some(total) = more {
+            let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Load more"));
+            if resp.hovered() {
+                ui.painter().rect_filled(rect, 6.0, p.border.gamma_multiply(0.45));
+            }
+            if busy {
+                egui::Spinner::new().size(16.0).paint_at(ui, Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
+            } else {
+                let left = total.saturating_sub(rows.len() as u64);
+                let label = if left > 99 { "+99".to_string() } else { format!("+{left}") };
+                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, theme::bold(12.0), p.fg_muted);
+            }
+            super::tip(&resp, &format!("Showing {} of {total} · Load more", rows.len()));
+            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                app.actions.push(Action::LoadMore);
+            }
+        }
+        });
     });
 }
 
@@ -304,10 +338,23 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
             let width = ui.painter().layout_no_wrap(label.clone(), theme::bold(13.0), p.fg).size().x + pad;
             let resp = seg(ui, shown, &label, width, hidden_active.is_some());
             egui::Popup::menu(&resp).align(egui::RectAlign::BOTTOM_END).show(|ui| {
-                ui.set_min_width(160.0);
+                ui.set_min_width(180.0);
+                ui.spacing_mut().item_spacing.y = 0.0;
                 for i in shown..SECTIONS.len() {
-                    if ui.selectable_label(active == Some(i), SECTIONS[i].title).clicked() {
+                    let on = active == Some(i);
+                    let (r, row) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+                    row.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, SECTIONS[i].title));
+                    if row.hovered() {
+                        ui.painter().rect_filled(r.shrink2(vec2(4.0, 0.0)), 6.0, p.hover_row);
+                    }
+                    if on {
+                        icons::paint(ui.painter(), Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(14.0, 14.0)), Icon::Check, p.fg);
+                    }
+                    let font = if on { theme::bold(14.0) } else { theme::body(14.0) };
+                    ui.painter().text(pos2(r.left() + 36.0, r.center().y), egui::Align2::LEFT_CENTER, SECTIONS[i].title, font, p.fg);
+                    if row.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                         app.actions.push(Action::SetView(View::Section(i)));
+                        ui.close();
                     }
                 }
             });
@@ -510,16 +557,17 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     let who = pr.author.as_ref().map(|a| a.login.as_str()).unwrap_or("ghost");
     // "by octocat" never splits across lines.
     let who = &who.to_string();
-    let meta = match pr.state.as_str() {
-        "MERGED" => format!("#{}\u{a0}by\u{a0}{who} was merged {}", pr.number, nb(&util::ago(pr.merged_at.as_deref().unwrap_or(&pr.updated_at)))),
-        "CLOSED" => format!("#{}\u{a0}by\u{a0}{who} was closed {}", pr.number, nb(&util::ago(pr.closed_at.as_deref().unwrap_or(&pr.updated_at)))),
-        _ => format!("#{} opened {} by\u{a0}{who}", pr.number, nb(&util::ago(&pr.created_at))),
-    };
+    // One unbreakable run, so it only wraps before a "•" chip.
+    let meta = nb(&match pr.state.as_str() {
+        "MERGED" => format!("#{} by {who} was merged {}", pr.number, util::ago(pr.merged_at.as_deref().unwrap_or(&pr.updated_at))),
+        "CLOSED" => format!("#{} by {who} was closed {}", pr.number, util::ago(pr.closed_at.as_deref().unwrap_or(&pr.updated_at))),
+        _ => format!("#{} opened {} by {who}", pr.number, util::ago(&pr.created_at)),
+    });
     let mut meta_job = egui::text::LayoutJob::default();
     meta_job.wrap.max_width = text_w;
     meta_job.append(&meta, 0.0, egui::TextFormat { font_id: theme::body(12.0), color: p.fg_muted, ..Default::default() });
     if pr.is_draft && pr.state == "OPEN" {
-        meta_job.append("•\u{a0}Draft", 8.0, egui::TextFormat { font_id: theme::body(12.0), color: p.fg_muted, ..Default::default() });
+        meta_job.append(" •\u{a0}Draft", 0.0, egui::TextFormat { font_id: theme::body(12.0), color: p.fg_muted, ..Default::default() });
     }
     // Review state, in words like github.com's list.
     let review = match pr.review_decision.as_deref() {
@@ -530,12 +578,12 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
         _ => None,
     };
     if let Some((text, color)) = review {
-        meta_job.append(&format!("•\u{a0}{}", text.replace(' ', "\u{a0}")), 8.0, egui::TextFormat { font_id: theme::body(12.0), color, ..Default::default() });
+        meta_job.append(&format!(" •\u{a0}{}", text.replace(' ', "\u{a0}")), 0.0, egui::TextFormat { font_id: theme::body(12.0), color, ..Default::default() });
     }
     // Merge readiness, e.g. "● Ready to merge", once GitHub has worked it out.
     if let Some(ms) = row_status(p, pr, detail).filter(|m| m.short != "Checking" && m.short != "Draft") {
         // No-break spaces: the chip moves to the next line whole.
-        meta_job.append(&format!("●\u{a0}{}", ms.short.replace(' ', "\u{a0}").replace('-', "\u{2011}")), 8.0, egui::TextFormat { font_id: theme::bold(12.0), color: ms.color, ..Default::default() });
+        meta_job.append(&format!(" ●\u{a0}{}", ms.short.replace(' ', "\u{a0}").replace('-', "\u{2011}")), 0.0, egui::TextFormat { font_id: theme::bold(12.0), color: ms.color, ..Default::default() });
     }
     let meta_g = ui.painter().layout_job(meta_job);
 

@@ -128,7 +128,7 @@ pub const DARK: Palette = Palette {
     btn_bg: hex(0x212830),
     btn_primary: hex(0x238636),
     selected_row: hex(0x121d2f),
-    hover_row: hex(0x1a2029),
+    hover_row: hex(0x1f242c),
     diff_add: hex(0x12261e),
     diff_add_num: hex(0x1c4328),
     diff_del: hex(0x25171c),
