@@ -178,59 +178,104 @@ pub fn sign_in(app: &mut App, ui: &mut Ui) {
     });
 }
 
+/// One ⌘K result: a PR already loaded, or a ref to fetch from GitHub.
+enum GoResult {
+    Pr(crate::github::PrSummary),
+    Ref(String, u64),
+}
+
+impl GoResult {
+    fn key(&self) -> String {
+        match self {
+            GoResult::Pr(pr) => pr.id.clone(),
+            GoResult::Ref(repo, n) => format!("{repo}#{n}"),
+        }
+    }
+}
+
+/// Every PR in the loaded lists, in a fixed order (the list on screen
+/// first), so ⌘K results don't reshuffle as other lists finish loading.
+fn loaded_prs(app: &App) -> Vec<&crate::github::PrSummary> {
+    let current = app.list_key(&app.view);
+    let mut keys: Vec<&String> = app.lists.keys().collect();
+    keys.sort_by_key(|k| (**k != current, (*k).clone()));
+    let mut out: Vec<&crate::github::PrSummary> = Vec::new();
+    for k in keys {
+        for pr in app.lists[k].data.iter().flat_map(|l| l.rows.iter()) {
+            if !out.iter().any(|o| o.id == pr.id) {
+                out.push(pr);
+            }
+        }
+    }
+    out
+}
+
 /// ⌘K: type a PR number, `owner/repo#123`, or paste a link to open it.
 pub fn goto_box(app: &mut App, ctx: &egui::Context) {
     let default_repo = app.default_repo();
-    // Words instead of a number: match titles of PRs already loaded.
     let typed = app.goto.as_ref().map(|g| g.text.trim().to_lowercase()).unwrap_or_default();
-    let mut matches: Vec<crate::github::PrSummary> = Vec::new();
-    if typed.len() >= 2 && crate::util::parse_pr_ref(&typed, default_repo.as_deref()).is_none() {
-        for pr in app.lists.values().filter_map(|l| l.data.as_ref()).flat_map(|l| l.rows.iter()) {
+    let loaded = loaded_prs(app);
+    let mut results: Vec<GoResult> = Vec::new();
+    let has = |results: &[GoResult], id: &str| results.iter().any(|r| matches!(r, GoResult::Pr(p) if p.id == id));
+    let digits = typed.trim_start_matches('#');
+    let bare = !digits.is_empty() && digits.bytes().all(|c| c.is_ascii_digit());
+    let parsed = crate::util::parse_pr_ref(&typed, default_repo.as_deref());
+    if bare {
+        // Loaded PRs with that number first (the default repo is only a
+        // guess), then the guess, then numbers that start with it.
+        let n: u64 = digits.parse().unwrap_or(0);
+        for pr in loaded.iter().filter(|p| p.number == n) {
+            results.push(GoResult::Pr((*pr).clone()));
+        }
+        if let Some((repo, n)) = parsed.clone() {
+            let known = results.iter().any(|r| matches!(r, GoResult::Pr(p) if p.repository.name_with_owner.eq_ignore_ascii_case(&repo)));
+            if !known {
+                results.push(GoResult::Ref(repo, n));
+            }
+        }
+        for pr in loaded.iter().filter(|p| p.number != n && p.number.to_string().starts_with(digits)) {
+            results.push(GoResult::Pr((*pr).clone()));
+        }
+    } else if let Some((repo, n)) = parsed {
+        // A ref or link: the loaded PR if we have it, else fetch it.
+        match loaded.iter().find(|p| p.number == n && p.repository.name_with_owner.eq_ignore_ascii_case(&repo)) {
+            Some(pr) => results.push(GoResult::Pr((*pr).clone())),
+            None => results.push(GoResult::Ref(repo, n)),
+        }
+    } else if typed.len() >= 2 {
+        // Words: match titles of PRs already loaded.
+        for pr in &loaded {
             let hay = format!("{} {}", pr.title, pr.repository.name_with_owner);
-            if crate::util::words_match(&hay, &typed) && !matches.iter().any(|m| m.id == pr.id) {
-                matches.push(pr.clone());
-            }
-        }
-        matches.truncate(6);
-    }
-    // A bare number: PRs already loaded with that number come first, since
-    // the default repo is only a guess.
-    let bare: Option<u64> = typed.trim_start_matches('#').parse().ok();
-    if let Some(n) = bare {
-        for pr in app.lists.values().filter_map(|l| l.data.as_ref()).flat_map(|l| l.rows.iter()) {
-            if pr.number == n && !matches.iter().any(|m| m.id == pr.id) {
-                matches.push(pr.clone());
+            if crate::util::words_match(&hay, &typed) && !has(&results, &pr.id) {
+                results.push(GoResult::Pr((*pr).clone()));
             }
         }
     }
-    // A ref or link to a PR that's already loaded: show it like the others.
-    if bare.is_none() {
-        if let Some((repo, n)) = crate::util::parse_pr_ref(&typed, default_repo.as_deref()) {
-            let known = app.lists.values().filter_map(|l| l.data.as_ref()).flat_map(|l| l.rows.iter());
-            if let Some(pr) = known.into_iter().find(|p| p.number == n && p.repository.name_with_owner.eq_ignore_ascii_case(&repo)) {
-                matches.push(pr.clone());
-            }
-        }
-    }
+    results.truncate(6);
+    drop(loaded);
+
     let mut picked: Option<crate::github::PrSummary> = None;
+    let mut submit = false;
     let Some(g) = app.goto.as_mut() else { return };
+    // The highlight follows a result, not a position, so it can't jump to
+    // another PR when the results change.
+    let mut sel = g.sel.as_ref().and_then(|k| results.iter().position(|r| r.key() == *k)).unwrap_or(0);
     // Arrow keys (and Ctrl-N/P) move the highlight. Taken before the text
     // box sees them, so they don't move its cursor.
-    if !matches.is_empty() {
+    if !results.is_empty() {
         let (down, up) = ctx.input_mut(|i| {
             let down = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) || i.consume_key(egui::Modifiers::CTRL, egui::Key::N);
             let up = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) || i.consume_key(egui::Modifiers::CTRL, egui::Key::P);
             (down, up)
         });
         if down {
-            g.sel = (g.sel + 1) % matches.len();
+            sel = (sel + 1) % results.len();
         }
         if up {
-            g.sel = (g.sel + matches.len() - 1) % matches.len();
+            sel = (sel + results.len() - 1) % results.len();
         }
     }
-    g.sel = g.sel.min(matches.len().saturating_sub(1));
-    let sel = g.sel;
+    g.sel = results.get(sel).map(GoResult::key);
     let p = theme::palette(ctx);
     let id = egui::Id::new("goto");
     let area = egui::Modal::default_area(id).anchor(egui::Align2::CENTER_TOP, vec2(0.0, 96.0));
@@ -240,7 +285,6 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
         .corner_radius(12)
         .inner_margin(Margin::same(0))
         .shadow(egui::Shadow { offset: [0, 12], blur: 48, spread: 0, color: Color32::from_black_alpha(if p.dark { 180 } else { 70 }) });
-    let mut submit = false;
     let resp = egui::Modal::new(id).area(area).frame(frame).backdrop_color(p.backdrop).show(ctx, |ui| {
         ui.set_width(560.0);
         Frame::new().inner_margin(Margin::symmetric(16, 14)).show(ui, |ui| {
@@ -260,17 +304,16 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
                 }
                 if edit.changed() {
                     g.error = None;
-                    g.sel = 0;
+                    g.sel = None;
                 }
                 // A pasted link is unambiguous, so open it straight away.
                 let pasted = g.text.len() > before.len() + 1 && g.text.contains("github.com/");
                 if pasted && crate::util::parse_pr_ref(&g.text, None).is_some() {
                     submit = true;
                 } else if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    // Enter opens the highlighted match.
-                    match matches.get(sel) {
-                        Some(pr) => picked = Some(pr.clone()),
-                        None => submit = true,
+                    match results.get(sel) {
+                        Some(GoResult::Pr(pr)) => picked = Some(pr.clone()),
+                        _ => submit = true,
                     }
                 }
             });
@@ -278,67 +321,75 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
         ui.painter().hline(ui.min_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, p.border_muted));
         Frame::new().inner_margin(Margin::symmetric(16, 10)).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                let target = crate::util::parse_pr_ref(&g.text, default_repo.as_deref()).filter(|_| matches.is_empty());
-                if g.loading {
+            if g.loading {
+                ui.horizontal(|ui| {
                     ui.spinner();
                     ui.label(RichText::new("Opening…").color(p.fg_muted).size(13.0));
-                } else if let Some(e) = &g.error {
+                });
+            } else if let Some(e) = &g.error {
+                ui.horizontal(|ui| {
                     icons::show(ui, Icon::X, 14.0, p.closed);
                     ui.label(RichText::new(e).color(p.closed).size(13.0));
-                } else if let Some((repo, n)) = target {
-                    // The one result, highlighted like a selected palette item.
-                    let r = ui.available_rect_before_wrap().expand2(vec2(8.0, 4.0));
-                    ui.painter().rect_filled(Rect::from_min_size(r.min, vec2(r.width(), 30.0)), 6.0, p.hover_row);
-                    ui.painter().rect_filled(Rect::from_min_size(r.min + vec2(0.0, 5.0), vec2(2.0, 20.0)), 1.0, p.accent_emphasis);
-                    icons::show(ui, Icon::PrOpen, 14.0, p.fg_muted);
-                    ui.label(RichText::new(format!("{repo}#{n}")).font(theme::bold(13.0)).color(p.fg));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new("Enter to open").color(p.fg_muted).size(12.0));
-                    });
-                } else if !matches.is_empty() {
-                    ui.vertical(|ui| {
-                        for (i, pr) in matches.iter().enumerate() {
-                            let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
-                            // Hover moves the highlight, but only when the mouse
-                            // moves, so a resting pointer doesn't fight the keys.
-                            if resp.hovered() && ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO) && g.sel != i {
-                                g.sel = i;
-                                ui.ctx().request_repaint();
+                });
+            } else if !results.is_empty() {
+                ui.vertical(|ui| {
+                    for (i, res) in results.iter().enumerate() {
+                        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
+                        // Hover moves the highlight, but only when the mouse
+                        // moves, so a resting pointer doesn't fight the keys.
+                        if resp.hovered() && ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO) && i != sel {
+                            g.sel = Some(res.key());
+                            ui.ctx().request_repaint();
+                        }
+                        let on = i == sel;
+                        if on {
+                            ui.painter().rect_filled(r, 6.0, p.hover_row);
+                            ui.painter().rect_filled(Rect::from_min_size(r.min + vec2(0.0, 5.0), vec2(2.0, 20.0)), 1.0, p.accent_emphasis);
+                        }
+                        let mut job = egui::text::LayoutJob::default();
+                        let muted = |c| egui::TextFormat { font_id: theme::body(13.0), color: c, ..Default::default() };
+                        let (icon, color) = match res {
+                            GoResult::Pr(pr) => {
+                                job.append(&format!("{}#{} ", pr.repository.name_with_owner, pr.number), 0.0, muted(p.fg_muted));
+                                append_title(&mut job, &pr.title, 13.0, true, 0.0, p);
+                                let (icon, color, _) = pr_icon(&pr.state, pr.is_draft, p);
+                                (icon, color)
                             }
-                            if i == sel {
-                                ui.painter().rect_filled(r, 6.0, p.hover_row);
-                                ui.painter().rect_filled(Rect::from_min_size(r.min + vec2(0.0, 5.0), vec2(2.0, 20.0)), 1.0, p.accent_emphasis);
+                            GoResult::Ref(repo, n) => {
+                                job.append(&format!("{repo}#{n}"), 0.0, egui::TextFormat { font_id: theme::bold(13.0), color: p.fg, ..Default::default() });
+                                job.append("Open from GitHub", 8.0, muted(p.fg_muted));
+                                (Icon::PrOpen, p.fg_muted)
                             }
-                            let (icon, color, _) = pr_icon(&pr.state, pr.is_draft, p);
-                            icons::paint(ui.painter(), Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - 7.0), vec2(14.0, 14.0)), icon, color);
-                            let mut job = egui::text::LayoutJob::default();
-                            let prefix = format!("{}#{} ", pr.repository.name_with_owner, pr.number);
-                            job.append(&prefix, 0.0, egui::TextFormat { font_id: theme::body(13.0), color: p.fg_muted, ..Default::default() });
-                            append_title(&mut job, &pr.title, 13.0, true, 0.0, p);
-                            // The highlighted row gets the Enter hint, like the single result.
-                            let hint_w = if i == sel { 100.0 } else { 0.0 };
-                            job.wrap = egui::text::TextWrapping::truncate_at_width(r.width() - 44.0 - hint_w);
-                            let tg = ui.painter().layout_job(job);
-                            ui.painter().galley(pos2(r.left() + 32.0, r.center().y - tg.size().y / 2.0), tg, p.fg);
-                            if i == sel {
-                                ui.painter().text(pos2(r.right() - 8.0, r.center().y), egui::Align2::RIGHT_CENTER, "Enter to open", theme::body(12.0), p.fg_muted);
-                            }
-                            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                                picked = Some(pr.clone());
+                        };
+                        icons::paint(ui.painter(), Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - 7.0), vec2(14.0, 14.0)), icon, color);
+                        // The highlighted row gets the Enter hint.
+                        let hint_w = if on { 100.0 } else { 0.0 };
+                        job.wrap = egui::text::TextWrapping::truncate_at_width(r.width() - 44.0 - hint_w);
+                        let tg = ui.painter().layout_job(job);
+                        ui.painter().galley(pos2(r.left() + 32.0, r.center().y - tg.size().y / 2.0), tg, p.fg);
+                        if on {
+                            ui.painter().text(pos2(r.right() - 8.0, r.center().y), egui::Align2::RIGHT_CENTER, "Enter to open", theme::body(12.0), p.fg_muted);
+                        }
+                        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                            match res {
+                                GoResult::Pr(pr) => picked = Some(pr.clone()),
+                                GoResult::Ref(..) => {
+                                    g.sel = Some(res.key());
+                                    submit = true;
+                                }
                             }
                         }
-                    });
-                } else if !g.text.trim().is_empty() {
-                    ui.label(RichText::new("Not a PR number or link, and no loaded PR title matches.").color(p.fg_muted).size(13.0));
-                } else {
-                    let hint = match &default_repo {
-                        Some(r) => format!("A bare number opens a PR in {r}. Esc to close."),
-                        None => "Include the repo, like owner/repo#123. Esc to close.".to_string(),
-                    };
-                    ui.label(RichText::new(hint).color(p.fg_muted).size(13.0));
-                }
-            });
+                    }
+                });
+            } else if !g.text.trim().is_empty() {
+                ui.label(RichText::new("No matching pull requests.").color(p.fg_muted).size(13.0));
+            } else {
+                let hint = match &default_repo {
+                    Some(r) => format!("A bare number opens a PR in {r}. Esc to close."),
+                    None => "Include the repo, like owner/repo#123. Esc to close.".to_string(),
+                };
+                ui.label(RichText::new(hint).color(p.fg_muted).size(13.0));
+            }
         });
     });
     if let Some(pr) = picked {
@@ -473,8 +524,11 @@ pub fn toast(app: &mut App, ctx: &egui::Context) {
 pub fn avatar(ui: &mut Ui, url: &str, size: f32) -> egui::Response {
     let p = theme::palette(ui.ctx());
     if url.is_empty() {
+        // No GitHub account: a plain person, like GitHub's default avatar.
         let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
-        ui.painter().circle_filled(rect.center(), size / 2.0, p.border);
+        ui.painter().circle_filled(rect.center(), size / 2.0, p.canvas_subtle);
+        ui.painter().circle_stroke(rect.center(), size / 2.0, Stroke::new(1.0, p.border_muted));
+        icons::paint(ui.painter(), rect.shrink(size * 0.2), Icon::Person, p.fg_muted);
         return resp;
     }
     let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
@@ -602,9 +656,18 @@ fn tip_at(resp: &egui::Response, text: &str, above: bool) {
 /// A square button with just an icon. `label` is its tooltip and the name
 /// screen readers (and scripted UI tests) use.
 pub fn icon_button(ui: &mut Ui, icon: Icon, label: &str, p: &Palette) -> egui::Response {
+    icon_button_at(ui, icon, label, p, false)
+}
+
+/// `icon_button` with its tooltip above, clear of what's below it.
+pub fn icon_button_tip_above(ui: &mut Ui, icon: Icon, label: &str, p: &Palette) -> egui::Response {
+    icon_button_at(ui, icon, label, p, true)
+}
+
+fn icon_button_at(ui: &mut Ui, icon: Icon, label: &str, p: &Palette, above: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
-    tip(&resp, label);
+    tip_at(&resp, label, above);
     let bg = if resp.hovered() { ui.visuals().widgets.hovered.weak_bg_fill } else { p.btn_bg };
     ui.painter().rect(rect, 6.0, bg, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
     icons::paint(ui.painter(), rect.shrink(8.0), icon, p.fg_muted);

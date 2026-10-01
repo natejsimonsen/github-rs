@@ -1007,6 +1007,7 @@ fn commits_row(app: &mut App, ui: &mut Ui, p: &Palette, commits: &[&EventCommit]
     let n = commits.len();
     event_line(ui, p, Icon::Commit, None, who.as_ref(), |ui| {
         if who.is_none() {
+            avatar(ui, "", 20.0);
             let name = first.author.as_ref().and_then(|a| a.name.clone()).unwrap_or_else(|| "Someone".into());
             ui.label(RichText::new(name).font(theme::bold(14.0)).color(p.fg));
         }
@@ -1348,12 +1349,24 @@ fn thread_footer(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, busy: bool
     // Write / Preview, like the main comment box.
     let preview_id = egui::Id::new(("reply-preview", &t.id));
     let mut preview = ui.ctx().data(|d| d.get_temp::<bool>(preview_id)).unwrap_or(false);
+    let mut format = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for (label, on) in [("Write", false), ("Preview", true)] {
             if composer_tab(ui, p, label, preview == on).clicked() {
                 preview = on;
             }
+        }
+        // The same formatting buttons as the main comment box.
+        if !preview {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                for f in Format::ALL.iter().rev() {
+                    if toolbar_button(ui, p, *f).clicked() {
+                        format = Some(*f);
+                    }
+                }
+            });
         }
     });
     ui.ctx().data_mut(|d| d.insert_temp(preview_id, preview));
@@ -1372,21 +1385,31 @@ fn thread_footer(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, busy: bool
         });
     }
     let Some(draft) = app.thread_replies.get_mut(&t.id) else { return };
+    let edit_id = egui::Id::new(("reply", &t.id));
+    if let Some(f) = format {
+        let n = draft.chars().count();
+        let (start, end) = egui::TextEdit::load_state(ui.ctx(), edit_id)
+            .and_then(|s| s.cursor.char_range())
+            .map(|r| {
+                let (a, b) = (r.primary.index.0, r.secondary.index.0);
+                (a.min(b), a.max(b))
+            })
+            .unwrap_or((n, n));
+        let (a, b) = f.apply(draft, start, end);
+        set_cursor(ui.ctx(), edit_id, a, b);
+        ui.memory_mut(|m| m.request_focus(edit_id));
+    }
     let mut edit_resp = None;
     if !preview {
-        ui.horizontal_top(|ui| {
-            let url = if app.viewer.is_empty() { String::new() } else { format!("https://github.com/{}.png?size=48", app.viewer) };
-            avatar(ui, &url, 24.0);
-            edit_resp = Some(ui.add(
-                egui::TextEdit::multiline(draft)
-                    .id(egui::Id::new(("reply", &t.id)))
-                    .hint_text("Reply… (Markdown supported, ⌘Enter to send)")
-                    .desired_rows(3)
-                    .desired_width(f32::INFINITY)
-                    .font(theme::body(14.0))
-                    .margin(vec2(8.0, 8.0)),
-            ));
-        });
+        edit_resp = Some(ui.add(
+            egui::TextEdit::multiline(draft)
+                .id(edit_id)
+                .hint_text("Reply… (Markdown supported, ⌘Enter to send)")
+                .desired_rows(3)
+                .desired_width(f32::INFINITY)
+                .font(theme::body(14.0))
+                .margin(vec2(8.0, 8.0)),
+        ));
     }
     let Some(edit) = edit_resp else {
         let empty = draft.trim().is_empty();
@@ -1606,6 +1629,13 @@ fn merge_box(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                                         ui.label(RichText::new(&l.detail).size(13.0).color(p.fg_muted));
                                     }
                                 });
+                                // A draft's "Ready for review" sits at the end of its row.
+                                if l.icon == Icon::PrDraft && d.is_draft && open {
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        ui.set_min_height(32.0);
+                                        merge_actions(app, ui, p, d);
+                                    });
+                                }
                             });
                         })
                         .response;
@@ -1619,7 +1649,7 @@ fn merge_box(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                         row_separator(ui);
                     }
                 }
-                if open {
+                if open && !d.is_draft {
                     row_separator(ui);
                     egui::Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
                         ui.set_width(ui.available_width());
@@ -2310,11 +2340,15 @@ fn check_row(app: &mut App, ui: &mut Ui, p: &Palette, c: &Check) {
             ui.spacing_mut().item_spacing.x = 8.0;
             let (icon, color) = status_icon(&c.result, p);
             icons::show(ui, icon, 16.0, color);
+            // Skipped checks step back: faded picture, muted name.
+            let skipped = check_rank(&c.result) >= 3;
+            let name_color = if skipped { p.fg_muted } else { p.fg };
             // The app's picture (Actions, CircleCI, ...).
             let (rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
             match c.avatar.as_deref().filter(|u| !u.is_empty()) {
                 Some(url) => {
-                    egui::Image::new(url).corner_radius(6.0).show_loading_spinner(false).paint_at(ui, rect);
+                    let tint = if skipped { Color32::from_white_alpha(110) } else { Color32::WHITE };
+                    egui::Image::new(url).corner_radius(6.0).tint(tint).show_loading_spinner(false).paint_at(ui, rect);
                 }
                 None => {
                     ui.painter().rect_filled(rect, 6.0, p.canvas_subtle);
@@ -2329,7 +2363,7 @@ fn check_row(app: &mut App, ui: &mut Ui, p: &Palette, c: &Check) {
                 Some(g) => format!("{g} / {}", c.name),
                 None => c.name.clone(),
             };
-            job.append(&name, 0.0, egui::TextFormat { font_id: theme::bold(13.0), color: p.fg, ..Default::default() });
+            job.append(&name, 0.0, egui::TextFormat { font_id: theme::bold(13.0), color: name_color, ..Default::default() });
             // "(pull_request)" only if it fits whole; it's the first thing to go.
             if let Some(e) = &c.event {
                 let need = ui.painter().layout_no_wrap(format!("{name} ({e})"), theme::bold(13.0), p.fg).size().x;

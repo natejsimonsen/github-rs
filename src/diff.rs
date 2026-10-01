@@ -472,7 +472,7 @@ fn marks_changed_words() {
 /// "Files 38" with the button that hides the tree.
 fn tree_header(ui: &mut Ui, p: &Palette, layout: &Layout, toggle: &mut bool) {
     ui.horizontal(|ui| {
-        *toggle |= crate::views::icon_button(ui, Icon::SidebarLeftClose, "Hide file tree (⇧⌘B)", p).clicked();
+        *toggle |= crate::views::icon_button_tip_above(ui, Icon::SidebarLeftClose, "Hide file tree (⇧⌘B)", p).clicked();
         ui.label(egui::RichText::new("Files").font(theme::bold(14.0)).color(p.fg));
         ui.label(egui::RichText::new(layout.files.len().to_string()).size(12.0).color(p.fg_muted));
     });
@@ -902,11 +902,16 @@ fn file_header(app: &mut App, ui: &mut Ui, p: &Palette, f: &FileDiff, fi: usize,
     };
     // Path, then a copy button right after it.
     let path_max = (menu_rect.left() - 8.0 - 28.0 - x).max(40.0);
-    let mut job = egui::text::LayoutJob::single_section(name, egui::TextFormat { font_id: theme::mono(12.0), color: p.fg, ..Default::default() });
-    job.wrap = egui::text::TextWrapping::truncate_at_width(path_max);
-    let g = painter.layout_job(job);
+    // Long paths lose their start, so the file name always shows.
+    let shown = crate::views::elide_front(painter, &name, theme::mono(12.0), path_max);
+    let cut = shown != name;
+    let g = painter.layout_no_wrap(shown, theme::mono(12.0), p.fg);
     let path_w = g.size().x;
-    painter.galley(pos2(x, r.center().y - g.size().y / 2.0), g, p.fg);
+    let path_rect = Rect::from_min_size(pos2(x, r.center().y - g.size().y / 2.0), g.size());
+    painter.galley(path_rect.min, g, p.fg);
+    if cut {
+        crate::views::tip(&ui.interact(path_rect, egui::Id::new(("file-path", fi)), Sense::hover()), &name);
+    }
     let copy_rect = Rect::from_min_size(pos2(x + path_w + 6.0, r.center().y - 12.0), vec2(24.0, 24.0));
     let copy_resp = ui.interact(copy_rect, egui::Id::new(("file-copy", fi)), Sense::click());
     copy_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Copy path"));

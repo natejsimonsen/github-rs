@@ -44,8 +44,9 @@ pub struct GoTo {
     pub text: String,
     pub loading: bool,
     pub error: Option<String>,
-    /// The highlighted result, moved with the arrow keys or the mouse.
-    pub sel: usize,
+    /// The highlighted result (a PR id or "owner/repo#n"), moved with the
+    /// arrow keys or the mouse.
+    pub sel: Option<String>,
     seq: u64,
 }
 
@@ -391,6 +392,7 @@ impl App {
     }
 
     pub fn list_key(&self, view: &View) -> String {
+        // `state_fits` reads the open/closed half back out of this.
         format!("list-{}-{}", self.closed, view.query())
     }
 
@@ -609,6 +611,10 @@ impl App {
                 }
                 let entry = self.lists.entry(key.clone()).or_default();
                 let old = entry.data.clone();
+                let result = result.map(|mut l| {
+                    l.rows.retain(|r| state_fits(&key, &r.state));
+                    l
+                });
                 entry.apply(result, stale);
                 if let (Some(old), Some(new)) = (old, entry.data.as_mut()) {
                     // The merge status arrives separately; don't lose it.
@@ -642,6 +648,7 @@ impl App {
             }
             Msg::ListRows { key, result } => {
                 let Ok(mut rows) = result else { return };
+                rows.retain(|r| state_fits(&key, &r.state));
                 let entry = self.lists.entry(key.clone()).or_default();
                 // Keep labels, avatars and CI we already have for these PRs,
                 // so a refresh doesn't make them blink.
@@ -656,6 +663,8 @@ impl App {
                             r.commits = o.commits.clone();
                             r.merge_state_status = o.merge_state_status.clone();
                             r.auto_merge = o.auto_merge;
+                            r.assignees = o.assignees.clone();
+                            r.review_decision = o.review_decision.clone();
                         }
                     }
                 }
@@ -1444,5 +1453,17 @@ impl eframe::App for App {
             let ms = frame_start.elapsed().as_secs_f64() * 1000.0;
             eprintln!("frame {:>5.1} ms  tab={:?}", ms, self.tab);
         }
+    }
+}
+
+/// GitHub's search can list a PR that was closed a moment ago under
+/// "Open" (and the reverse). Rows that don't fit their list are dropped.
+fn state_fits(key: &str, state: &str) -> bool {
+    if key.starts_with("list-false-") {
+        state == "OPEN"
+    } else if key.starts_with("list-true-") {
+        state != "OPEN"
+    } else {
+        true
     }
 }

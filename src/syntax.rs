@@ -253,20 +253,31 @@ fn markdown_inline(line: &str) -> Vec<(std::ops::Range<usize>, Tok)> {
         _ => 0,
     };
     kinds[indent..indent + marker].fill(Tok::ListMarker);
+    // Code spans first: nothing inside them is formatting, and they keep
+    // their color inside **bold** too.
+    let mut i = indent + marker;
+    while i < b.len() {
+        if b[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let ticks = b[i..].iter().take_while(|&&c| c == b'`').count();
+        match line[i + ticks..].find(&"`".repeat(ticks)).map(|j| i + ticks + j) {
+            Some(end) => {
+                kinds[i..end + ticks].fill(Tok::Constant);
+                i = end + ticks;
+            }
+            None => i += ticks,
+        }
+    }
     let mut i = indent + marker;
     let word = |c: u8| c.is_ascii_alphanumeric();
     while i < b.len() {
+        if kinds[i] == Tok::Constant {
+            i += 1;
+            continue;
+        }
         match b[i] {
-            b'`' => {
-                let ticks = b[i..].iter().take_while(|&&c| c == b'`').count();
-                let close = line[i + ticks..].find(&"`".repeat(ticks)).map(|j| i + ticks + j);
-                if let Some(end) = close {
-                    kinds[i..end + ticks].fill(Tok::Constant);
-                    i = end + ticks;
-                    continue;
-                }
-                i += ticks;
-            }
             c @ (b'*' | b'_') => {
                 let double = b.get(i + 1) == Some(&c);
                 let n = if double { 2 } else { 1 };
@@ -277,7 +288,12 @@ fn markdown_inline(line: &str) -> Vec<(std::ops::Range<usize>, Tok)> {
                 let close = opens.then(|| b[i + n..].windows(n).position(|w| w == mark)).flatten().map(|j| i + n + j);
                 match close {
                     Some(end) if end > i + n && b[end - 1] != b' ' => {
-                        kinds[i..end + n].fill(if double { Tok::Strong } else { Tok::Emphasis });
+                        let style = if double { Tok::Strong } else { Tok::Emphasis };
+                        for k in &mut kinds[i..end + n] {
+                            if *k != Tok::Constant {
+                                *k = style;
+                            }
+                        }
                         i = end + n;
                     }
                     _ => i += n,
@@ -444,4 +460,7 @@ fn colors_markdown() {
     assert_eq!(kind_of(1, "code", l1), Tok::Constant);
     assert_eq!(kind_of(1, "http", l1), Tok::Link);
     assert_eq!(kind_of(1, "Some", l1), Tok::Plain);
+    let l = highlight("markdown", "**`template` is required**").unwrap();
+    assert_eq!(l[0][0], (0..2, Tok::Strong));
+    assert_eq!(l[0][1], (2..12, Tok::Constant));
 }

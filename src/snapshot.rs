@@ -147,15 +147,14 @@ fn keys(s: &str) -> (Modifiers, Key) {
             "esc" | "escape" => key = Key::Escape,
             "end" => key = Key::End,
             "home" => key = Key::Home,
-            "down" => key = Key::ArrowDown,
-            "up" => key = Key::ArrowUp,
+            "down" | "arrowdown" => key = Key::ArrowDown,
+            "up" | "arrowup" => key = Key::ArrowUp,
             "tab" => key = Key::Tab,
             "/" | "slash" => key = Key::Slash,
-            other => {
-                if let Some(k) = Key::from_name(&other.to_ascii_uppercase()).or_else(|| Key::from_name(other)) {
-                    key = k;
-                }
-            }
+            _ => match Key::from_name(part).or_else(|| Key::from_name(&part.to_ascii_uppercase())) {
+                Some(k) => key = k,
+                None => eprintln!("snapshot: unknown key {part:?}, sending Escape"),
+            },
         }
     }
     (mods, key)

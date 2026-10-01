@@ -187,10 +187,15 @@ pub fn rail(app: &mut App, ui: &mut Ui) {
             View::Section(i) => (SECTIONS[*i].title, [Icon::PrOpen, Icon::Person, Icon::Comment, Icon::Eye, Icon::Sync][*i % 5]),
             View::Search(_) => ("Search", Icon::Search),
         };
-        let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 26.0), Sense::hover());
-        ui.painter().rect_filled(rect, 6.0, p.accent_subtle);
+        // Clicking it opens the list, like ⌘B.
+        let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 26.0), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Show {section}")));
+        ui.painter().rect_filled(rect, 6.0, if resp.hovered() { p.accent_subtle.gamma_multiply(1.6) } else { p.accent_subtle });
         icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(14.0, 14.0)), icon, p.accent);
-        super::tip(&resp, section);
+        super::tip(&resp, &format!("{section} · Show list (⌘B)"));
+        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            app.actions.push(Action::TogglePanel(crate::app::Panel::List));
+        }
         // A rule between the section badge and the PRs, so it doesn't read as one.
         ui.add_space(6.0);
         let y = ui.cursor().top();
@@ -391,8 +396,12 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     let width = ui.available_width();
     let left = 16.0 + 16.0 + 8.0;
     let comments = pr.comments.total_count;
-    // Fixed columns, so avatars line up row to row with or without comments.
-    let right = 16.0 + 20.0 + 44.0 + 8.0 + 12.0;
+    // The right column is only as wide as what's in it: the comment count
+    // and the assignees' faces. The title gets the rest.
+    let who = &pr.assignees.nodes;
+    let comment_w = if comments > 0 { 44.0 } else { 0.0 };
+    let faces_w = if who.is_empty() { 0.0 } else { 20.0 + (who.len() - 1) as f32 * 12.0 + if comments > 0 { 8.0 } else { 0.0 } };
+    let right = 16.0 + comment_w + faces_w + if comment_w + faces_w > 0.0 { 12.0 } else { 0.0 };
     let text_w = (width - left - right).max(80.0);
 
     // "owner/repo Title": one run of text, so it wraps naturally. The
@@ -550,7 +559,7 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     }
 
     // Top right: author, then comment count, level with the title.
-    let slot_left = rect.right() - 16.0 - 44.0;
+    let slot_left = rect.right() - 16.0 - comment_w;
     if comments > 0 {
         icons::paint(painter, Rect::from_min_size(pos2(slot_left + 4.0, origin.y + 2.0), vec2(16.0, 16.0)), Icon::Comment, p.fg_muted);
         let g = painter.layout_no_wrap(comments.to_string(), theme::bold(12.0), p.fg_muted);
@@ -559,8 +568,9 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     // Assignees, like github.com (the author is already in the meta line).
     // Overlapping, newest assignee on the right.
     let who = &pr.assignees.nodes;
+    let faces_right = slot_left - if comments > 0 { 8.0 } else { 0.0 };
     for (i, a) in who.iter().enumerate().rev() {
-        let left = slot_left - 8.0 - 20.0 - (who.len() - 1 - i) as f32 * 12.0;
+        let left = faces_right - 20.0 - (who.len() - 1 - i) as f32 * 12.0;
         let r = Rect::from_min_size(pos2(left, origin.y), vec2(20.0, 20.0));
         if who.len() > 1 {
             // A ring in the row's color separates overlapping faces.
@@ -571,7 +581,7 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
         avatar(&mut child, &a.avatar_url, 20.0);
     }
     if !who.is_empty() {
-        let span = Rect::from_min_max(pos2(slot_left - 28.0 - (who.len() - 1) as f32 * 12.0, origin.y), pos2(slot_left - 8.0, origin.y + 20.0));
+        let span = Rect::from_min_max(pos2(faces_right - 20.0 - (who.len() - 1) as f32 * 12.0, origin.y), pos2(faces_right, origin.y + 20.0));
         let hover = ui.interact(span, resp.id.with("assignees"), Sense::hover());
         let names: Vec<&str> = who.iter().map(|a| a.login.as_str()).collect();
         super::tip(&hover, &format!("Assigned to {}", names.join(", ")));
