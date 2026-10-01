@@ -464,3 +464,12 @@ fn colors_markdown() {
     assert_eq!(l[0][0], (0..2, Tok::Strong));
     assert_eq!(l[0][1], (2..12, Tok::Constant));
 }
+
+#[cfg(test)]
+#[test]
+fn colors_shell_comments() {
+    let lines = highlight_fragment("bash", &["#!/usr/bin/env bash", "set -euo pipefail", "", "#/ Usage: thing", "echo hi # trailing"]).unwrap();
+    assert_eq!(lines[0], vec![(0..19, Tok::Comment)]);
+    assert_eq!(lines[3], vec![(0..15, Tok::Comment)]);
+    assert!(lines[4].iter().any(|(_, t)| *t == Tok::Comment));
+}

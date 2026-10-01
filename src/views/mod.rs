@@ -548,25 +548,35 @@ pub fn toast(app: &mut App, ctx: &egui::Context) {
 
 /// Round avatar. Shows a gray circle until the image loads.
 pub fn avatar(ui: &mut Ui, url: &str, size: f32) -> egui::Response {
+    avatar_rounded(ui, url, size, size / 2.0)
+}
+
+/// A bot or app: GitHub draws those as rounded squares, people as circles.
+pub fn avatar_of(ui: &mut Ui, login: &str, url: &str, size: f32) -> egui::Response {
+    let bot = login.ends_with("[bot]") || login.ends_with("-bot") || login.ends_with("-robot") || login == "github-actions" || url.contains("/in/");
+    avatar_rounded(ui, url, size, if bot { size * 0.25 } else { size / 2.0 })
+}
+
+fn avatar_rounded(ui: &mut Ui, url: &str, size: f32, radius: f32) -> egui::Response {
     let p = theme::palette(ui.ctx());
+    let shape = |rect: egui::Rect, fill: Color32, stroke: Stroke| egui::Shape::Rect(egui::epaint::RectShape::new(rect, radius, fill, stroke, egui::StrokeKind::Inside));
     if url.is_empty() {
         // No GitHub account: a plain person, like GitHub's default avatar.
         let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
-        ui.painter().circle_filled(rect.center(), size / 2.0, p.canvas_subtle);
-        ui.painter().circle_stroke(rect.center(), size / 2.0, Stroke::new(1.0, p.border_muted));
+        ui.painter().add(shape(rect, p.canvas_subtle, Stroke::new(1.0, p.border_muted)));
         icons::paint(ui.painter(), rect.shrink(size * 0.2), Icon::Person, p.fg_muted);
         return resp;
     }
     let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
-    ui.painter().circle_filled(rect.center(), size / 2.0, p.border_muted);
-    let image = egui::Image::new(url).corner_radius(size / 2.0).show_loading_spinner(false);
+    ui.painter().add(shape(rect, p.border_muted, Stroke::NONE));
+    let image = egui::Image::new(url).corner_radius(radius).show_loading_spinner(false);
     // A failed download would draw egui's red error glyph; show an identicon instead.
     if image.load_for_size(ui.ctx(), rect.size()).is_err() {
         identicon(ui.painter(), rect, url, p);
     } else {
         image.paint_at(ui, rect);
     }
-    ui.painter().circle_stroke(rect.center(), size / 2.0, Stroke::new(1.0, p.border_muted));
+    ui.painter().add(shape(rect, Color32::TRANSPARENT, Stroke::new(1.0, p.border_muted)));
     resp
 }
 

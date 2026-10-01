@@ -702,15 +702,15 @@ fn details_panel(app: &mut App, ui: &mut Ui, p: &Palette, d: &Arc<PrDetail>) {
         &mut open,
         egui::Panel::right("details-rail")
             .resizable(false)
-            .exact_size(44.0)
+            .exact_size(58.0)
             .show_separator_line(false)
-            .frame(egui::Frame::new().inner_margin(Margin { left: 12, right: 0, top: 8, bottom: 0 })),
+            .frame(egui::Frame::new().inner_margin(Margin { left: 12, right: 14, top: 8, bottom: 0 })),
         egui::Panel::right("details")
             .resizable(true)
             .default_size(256.0)
             .size_range(200.0..=420.0)
             .show_separator_line(false)
-            .frame(egui::Frame::new().inner_margin(Margin { left: 24, right: 0, top: 8, bottom: 0 })),
+            .frame(egui::Frame::new().inner_margin(Margin { left: 24, right: 14, top: 8, bottom: 0 })),
         |ui, expanded| {
             if expanded {
                 ui.horizontal(|ui| {
@@ -922,7 +922,7 @@ fn event_line(ui: &mut Ui, p: &Palette, icon: Icon, badge: Option<Color32>, who:
             ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
             ui.spacing_mut().interact_size.y = 20.0;
             if let Some(a) = who {
-                avatar(ui, &a.avatar_url, 20.0);
+                super::avatar_of(ui, &a.login, &a.avatar_url, 20.0);
                 ui.label(RichText::new(&a.login).font(theme::bold(14.0)).color(p.fg));
                 if is_bot(&a.login, &a.avatar_url) {
                     pill(ui, "bot", theme::body(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
@@ -1133,7 +1133,7 @@ fn comment_card(
     let mut menu_acts = Vec::new();
     ui.horizontal_top(|ui| {
         if show_avatar {
-            avatar(ui, avatar_url, AVATAR);
+            super::avatar_of(ui, login, avatar_url, AVATAR);
             ui.add_space(16.0 - ui.spacing().item_spacing.x);
         } else {
             // Same left edge as an avatar plus its gap.
@@ -1242,7 +1242,7 @@ fn review_event(ui: &mut Ui, p: &Palette, r: &Review) {
         icons::paint(ui.painter(), rect.shrink(8.0), icon, badge_fg);
         ui.add_space(4.0);
         let av = r.author.as_ref().map(|a| a.avatar_url.as_str()).unwrap_or("");
-        avatar(ui, av, 20.0);
+        super::avatar_of(ui, login, av, 20.0);
         ui.spacing_mut().item_spacing.x = 4.0;
         ui.label(RichText::new(login).font(theme::bold(14.0)).color(p.fg));
         if is_bot(login, av) {
@@ -1281,7 +1281,8 @@ fn thread_box(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, repo: &str) {
                     // Long paths lose their start, so the file name stays.
                     let badges = if t.is_outdated { 80.0 } else { 0.0 } + if t.is_resolved { 170.0 } else if folded { 90.0 } else { 0.0 };
                     let room = (ui.available_width() - badges - 12.0).max(80.0);
-                    let shown = super::elide_front(ui.painter(), &format!("{}{line}", t.path), theme::mono(12.0), room);
+                    // The line number is in the tooltip, not the header, like GitHub.
+                    let shown = super::elide_front(ui.painter(), &t.path, theme::mono(12.0), room);
                     let g = ui.painter().layout_no_wrap(shown, theme::mono(12.0), path_color);
                     let (r, resp) = ui.allocate_exact_size(g.size(), Sense::click());
                     let hovered = resp.hovered();
@@ -1332,7 +1333,7 @@ fn thread_box(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, repo: &str) {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         let av = c.author.as_ref().map(|a| a.avatar_url.as_str()).unwrap_or("");
-                        avatar(ui, av, 24.0);
+                        super::avatar_of(ui, login, av, 24.0);
                         ui.label(RichText::new(login).font(theme::bold(14.0)).color(p.fg));
                         if is_bot(login, av) {
                             pill(ui, "bot", theme::body(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
@@ -2407,7 +2408,9 @@ fn checks(app: &mut App, ui: &mut Ui, p: &Palette, checks: &[Check]) {
 }
 
 fn check_row(app: &mut App, ui: &mut Ui, p: &Palette, c: &Check) {
-    egui::Frame::new().inner_margin(Margin::symmetric(16, 8)).show(ui, |ui| {
+    // The hover tint goes under the row, so it's reserved before drawing.
+    let slot = ui.painter().add(egui::Shape::Noop);
+    let r = egui::Frame::new().inner_margin(Margin::symmetric(16, 8)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
             ui.set_min_height(24.0);
@@ -2474,7 +2477,11 @@ fn check_row(app: &mut App, ui: &mut Ui, p: &Palette, c: &Check) {
                 }
             });
         });
-    });
+    })
+    .response;
+    if r.hovered() {
+        ui.painter().set(slot, egui::Shape::rect_filled(r.rect, 0.0, p.hover_row));
+    }
 }
 
 #[cfg(test)]

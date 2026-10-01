@@ -196,14 +196,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 
 /// "12 Open" / "34 Closed" in the list header: icon and text are one button.
 fn state_toggle(ui: &mut Ui, p: &Palette, icon: Icon, text: &str, active: bool) -> egui::Response {
-    let color = if active { p.fg } else { p.fg_muted };
     let font = if active { theme::bold(14.0) } else { theme::body(14.0) };
-    let g = ui.painter().layout_no_wrap(text.to_string(), font, color);
-    let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 16.0 + 6.0 + 16.0, 32.0), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.painter().layout_no_wrap(text.to_string(), font.clone(), p.fg).size().x + 16.0 + 6.0 + 16.0, 32.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, text));
-    if resp.hovered() {
-        ui.painter().rect_filled(rect, 6.0, p.hover_row);
-    }
+    let color = if active || resp.hovered() { p.fg } else { p.fg_muted };
+    let g = ui.painter().layout_no_wrap(text.to_string(), font, color);
     let icon_rect = Rect::from_min_size(pos2(rect.left() + 8.0, rect.center().y - 8.0), vec2(16.0, 16.0));
     icons::paint(ui.painter(), icon_rect, icon, color);
     ui.painter().galley(pos2(icon_rect.right() + 6.0, rect.center().y - g.size().y / 2.0), g, color);
@@ -218,7 +215,7 @@ pub fn rail(app: &mut App, ui: &mut Ui) {
         ui.spacing_mut().item_spacing.y = 4.0;
         // Which list this is, as an icon (GitHub never shortens labels).
         let (section, icon) = match &app.view {
-            View::Section(i) => (SECTIONS[*i].title, [Icon::PrOpen, Icon::Person, Icon::Comment, Icon::Eye, Icon::Sync][*i % 5]),
+            View::Section(i) => (SECTIONS[*i].title, [Icon::Branch, Icon::Person, Icon::Comment, Icon::Eye, Icon::Sync][*i % 5]),
             View::Search(_) => ("Search", Icon::Search),
         };
         // Clicking it opens the list, like ⌘B.
@@ -358,11 +355,13 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
             let width = ui.painter().layout_no_wrap(label.clone(), theme::bold(13.0), p.fg).size().x + pad;
             let resp = seg(ui, shown, &label, width, hidden_active.is_some());
             egui::Popup::menu(&resp).align(egui::RectAlign::BOTTOM_END).show(|ui| {
-                ui.set_min_width(180.0);
+                ui.set_max_width(200.0);
                 ui.spacing_mut().item_spacing.y = 0.0;
+                // Room for the check mark only when a hidden section is active.
+                let text_x = if hidden_active.is_some() { 36.0 } else { 12.0 };
                 for i in shown..SECTIONS.len() {
                     let on = active == Some(i);
-                    let (r, row) = ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click());
+                    let (r, row) = ui.allocate_exact_size(vec2(188.0, 32.0), Sense::click());
                     row.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, SECTIONS[i].title));
                     if row.hovered() {
                         ui.painter().rect_filled(r.shrink2(vec2(4.0, 0.0)), 6.0, p.hover_row);
@@ -371,7 +370,7 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
                         icons::paint(ui.painter(), Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(14.0, 14.0)), Icon::Check, p.fg);
                     }
                     let font = if on { theme::bold(14.0) } else { theme::body(14.0) };
-                    ui.painter().text(pos2(r.left() + 36.0, r.center().y), egui::Align2::LEFT_CENTER, SECTIONS[i].title, font, p.fg);
+                    ui.painter().text(pos2(r.left() + text_x, r.center().y), egui::Align2::LEFT_CENTER, SECTIONS[i].title, font, p.fg);
                     if row.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                         app.actions.push(Action::SetView(View::Section(i)));
                         ui.close();
@@ -517,6 +516,7 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     if ci.is_some() {
         job.append(CI_GAP, 0.0, egui::TextFormat { font_id: theme::bold(14.0), color: Color32::TRANSPARENT, ..Default::default() });
     }
+    let hover_job = job.clone();
     let title = ui.painter().layout_job(job);
     // Where the gap landed: the last glyphs of the last row.
     let ci_at = ci.and_then(|_| {
@@ -560,9 +560,8 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
         // Room for this label, plus a "+N" after it if more are coming.
         let more_w = if rest > 0 { 40.0 } else { 0.0 };
         let wraps = cx + size.x + more_w > text_w && cx > 0.0;
-        // Wide lists get two extra lines, narrow ones one.
-        let extra_lines = if text_w > 300.0 { 2.0 } else { 1.0 };
-        if wraps && cy > first_cy + (line_h + 2.0) * (extra_lines - 1.0) + 0.5 {
+        // One extra line of labels at any width; the rest become "+N".
+        if wraps && cy > first_cy + 0.5 {
             let (bg, fg, border) = (Color32::TRANSPARENT, p.fg_muted, p.border);
             let g = ui.painter().layout_no_wrap(format!("+{}", labels.len() - i), theme::bold(12.0), fg);
             let size = vec2(g.size().x + 14.0, 20.0);
@@ -628,6 +627,17 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     let origin = pos2(rect.left() + left, rect.top() + pad);
     let (icon, color, _) = pr_icon(&pr.state, pr.is_draft, p);
     icons::paint(painter, Rect::from_min_size(pos2(rect.left() + 16.0, origin.y + 2.0), vec2(16.0, 16.0)), icon, color);
+    let title = if resp.hovered() {
+        let mut job = hover_job;
+        for s in &mut job.sections {
+            if s.format.color == p.fg {
+                s.format.color = p.accent;
+            }
+        }
+        ui.painter().layout_job(job)
+    } else {
+        title
+    };
     painter.galley(origin + vec2(0.0, title_top), title, p.fg);
     for it in items {
         let r = Rect::from_min_size(origin + it.at, it.size);

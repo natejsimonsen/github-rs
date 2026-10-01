@@ -508,11 +508,7 @@ const EXTRA_FIELDS: &str = "
 /// `closed` switches every search between open and closed PRs.
 pub fn full_query(q: &str, closed: bool) -> String {
     let state = if closed { "is:closed" } else { "is:open" };
-    let mut s = format!("is:pr {state} archived:false {q}");
-    if !q.contains("sort:") {
-        s.push_str(" sort:updated-desc");
-    }
-    s
+    format!("is:pr {state} archived:false {q}")
 }
 
 impl Client {
