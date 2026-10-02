@@ -17,10 +17,7 @@ pub struct Emojis {
 
 impl Emojis {
     pub fn new(by_name: HashMap<String, String>) -> Self {
-        let files = by_name
-            .values()
-            .filter_map(|u| u.split("/unicode/").nth(1)?.split('.').next().map(str::to_string))
-            .collect();
+        let files = by_name.values().filter_map(|u| u.split("/unicode/").nth(1)?.split('.').next().map(str::to_string)).collect();
         Emojis { by_name, files }
     }
 
@@ -155,22 +152,24 @@ fn inline(line: &str, repo: &str, emojis: &Emojis, out: &mut String) {
             }
         }
         // owner/repo#123 and #123
-        if brackets == 0 && at_word_start(i) {
-            if let Some((text, target, len)) = issue_ref(&chars[i..], repo) {
-                out.push_str(&format!("[{text}](https://github.com/{target})"));
-                i += len;
-                continue;
-            }
+        if brackets == 0
+            && at_word_start(i)
+            && let Some((text, target, len)) = issue_ref(&chars[i..], repo)
+        {
+            out.push_str(&format!("[{text}](https://github.com/{target})"));
+            i += len;
+            continue;
         }
         // :shortcode:
         if c == ':' {
             let name: String = chars[i + 1..].iter().take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '+' | '-')).collect();
-            if !name.is_empty() && chars.get(i + 1 + name.len()) == Some(&':') {
-                if let Some(url) = emojis.by_name.get(&name) {
-                    out.push_str(&emoji_image(&format!(":{name}:"), url));
-                    i += name.len() + 2;
-                    continue;
-                }
+            if !name.is_empty()
+                && chars.get(i + 1 + name.len()) == Some(&':')
+                && let Some(url) = emojis.by_name.get(&name)
+            {
+                out.push_str(&emoji_image(&format!(":{name}:"), url));
+                i += name.len() + 2;
+                continue;
             }
         }
         // Unicode emoji, including skin tones, flags and joined sequences.
@@ -253,9 +252,9 @@ fn is_regional(c: char) -> bool {
 
 /// Symbols below U+1F000 that show as color emoji even without U+FE0F.
 const DEFAULT_EMOJI: &[char] = &[
-    '⌚', '⌛', '⏩', '⏪', '⏫', '⏬', '⏰', '⏳', '◽', '◾', '☔', '☕', '♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐', '♑', '♒',
-    '♓', '♿', '⚓', '⚡', '⚪', '⚫', '⚽', '⚾', '⛄', '⛅', '⛎', '⛔', '⛪', '⛲', '⛳', '⛵', '⛺', '⛽', '✅', '✊', '✋', '✨',
-    '❌', '❎', '❓', '❔', '❕', '❗', '➕', '➖', '➗', '➰', '➿', '⬛', '⬜', '⭐', '⭕',
+    '⌚', '⌛', '⏩', '⏪', '⏫', '⏬', '⏰', '⏳', '◽', '◾', '☔', '☕', '♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐', '♑', '♒', '♓', '♿', '⚓',
+    '⚡', '⚪', '⚫', '⚽', '⚾', '⛄', '⛅', '⛎', '⛔', '⛪', '⛲', '⛳', '⛵', '⛺', '⛽', '✅', '✊', '✋', '✨', '❌', '❎', '❓', '❔', '❕', '❗', '➕',
+    '➖', '➗', '➰', '➿', '⬛', '⬜', '⭐', '⭕',
 ];
 
 #[cfg(test)]

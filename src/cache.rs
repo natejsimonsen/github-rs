@@ -10,11 +10,7 @@ fn dir() -> Option<PathBuf> {
 
 /// Turn any key into a safe file name.
 fn path(key: &str) -> Option<PathBuf> {
-    let name: String = key
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' })
-        .take(150)
-        .collect();
+    let name: String = key.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).take(150).collect();
     Some(dir()?.join(format!("{name}.json")))
 }
 

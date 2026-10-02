@@ -127,9 +127,7 @@ pub fn lang_for_fence(info: &str) -> Option<String> {
     if !as_file.is_empty() {
         return lang_for_path(as_file).map(str::to_string);
     }
-    lang_for_path(&format!("x.{word}"))
-        .map(str::to_string)
-        .or_else(|| HIGHLIGHTER.with(|h| h.borrow().store().get(&word).is_some()).then_some(word))
+    lang_for_path(&format!("x.{word}")).map(str::to_string).or_else(|| HIGHLIGHTER.with(|h| h.borrow().store().get(&word).is_some()).then_some(word))
 }
 
 /// Highlights `source` as `lang`, split into lines. Cached by content, so
@@ -306,15 +304,13 @@ fn markdown_inline(line: &str) -> Vec<(std::ops::Range<usize>, Tok)> {
                     _ => i += n,
                 }
             }
-            b']' if b.get(i + 1) == Some(&b'(') => {
-                match line[i + 1..].find(')') {
-                    Some(j) => {
-                        kinds[i + 2..i + 1 + j].fill(Tok::Link);
-                        i += j + 2;
-                    }
-                    None => i += 1,
+            b']' if b.get(i + 1) == Some(&b'(') => match line[i + 1..].find(')') {
+                Some(j) => {
+                    kinds[i + 2..i + 1 + j].fill(Tok::Link);
+                    i += j + 2;
                 }
-            }
+                None => i += 1,
+            },
             _ => i += 1,
         }
     }

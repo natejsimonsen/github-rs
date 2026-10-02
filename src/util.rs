@@ -20,20 +20,14 @@ pub fn ago(iso: &str) -> String {
         }
         _ => {
             let local = t.with_timezone(&Local);
-            if local.year() == Local::now().year() {
-                format!("on {}", local.format("%b %-d"))
-            } else {
-                format!("on {}", local.format("%b %-d, %Y"))
-            }
+            if local.year() == Local::now().year() { format!("on {}", local.format("%b %-d")) } else { format!("on {}", local.format("%b %-d, %Y")) }
         }
     }
 }
 
 /// "Sep 28, 2026" for grouping commits by day.
 pub fn day(iso: &str) -> String {
-    DateTime::parse_from_rfc3339(iso)
-        .map(|t| t.with_timezone(&Local).format("%b %-d, %Y").to_string())
-        .unwrap_or_default()
+    DateTime::parse_from_rfc3339(iso).map(|t| t.with_timezone(&Local).format("%b %-d, %Y").to_string()).unwrap_or_default()
 }
 
 /// Open a link in the default browser with each OS's own API.
@@ -150,12 +144,7 @@ fn find_tag(lower: &str, from: usize, name: &str) -> Option<usize> {
 /// still parses. Lines inside a quote or list keep their prefix.
 fn html_line(line: &str, out: &mut String) {
     let lower = line.to_ascii_lowercase();
-    let next_block = |from: usize| {
-        ["<details", "</details", "<summary", "<table"]
-            .into_iter()
-            .filter_map(|t| find_tag(&lower, from, t).map(|i| (i, t)))
-            .min()
-    };
+    let next_block = |from: usize| ["<details", "</details", "<summary", "<table"].into_iter().filter_map(|t| find_tag(&lower, from, t).map(|i| (i, t))).min();
     if next_block(0).is_none() {
         out.push_str(&strip_tags(line));
         out.push('\n');
@@ -293,11 +282,7 @@ fn html_table(html: &str) -> String {
                     _ => "---",
                 });
             }
-            let stop = ["</td", "</th", "<td", "<th", "</tr"]
-                .iter()
-                .filter_map(|t| lower[open_end..row_end].find(t))
-                .min()
-                .map_or(row_end, |k| open_end + k);
+            let stop = ["</td", "</th", "<td", "<th", "</tr"].iter().filter_map(|t| lower[open_end..row_end].find(t)).min().map_or(row_end, |k| open_end + k);
             // <br> becomes a newline in strip_tags; keep it as a line break in the cell.
             let text = strip_tags(&html[open_end..stop].replace('\n', " "));
             let lines: Vec<String> = text.split('\n').map(|l| l.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|l| !l.is_empty()).collect();
@@ -342,12 +327,7 @@ fn strip_tags(line: &str) -> String {
             return out;
         };
         let tag = &rest[i + 1..i + j];
-        let name: String = tag
-            .trim_start_matches('/')
-            .chars()
-            .take_while(|c| c.is_ascii_alphanumeric())
-            .collect::<String>()
-            .to_ascii_lowercase();
+        let name: String = tag.trim_start_matches('/').chars().take_while(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
         match name.as_str() {
             "br" | "p" | "div" => out.push('\n'),
             "b" | "strong" => out.push_str("**"),
@@ -374,9 +354,8 @@ fn strip_tags(line: &str) -> String {
             // A real tag we can't render: drop it. Anything else (like
             // "a < b" or "<T>") isn't HTML, so keep it as text. Details and
             // tables only get here from odd spots, like inside a table cell.
-            "details" | "summary" | "sub" | "sup" | "span" | "table" | "tr" | "td" | "th" | "thead" | "tbody"
-            | "ul" | "ol" | "li" | "h1" | "h2" | "h3" | "h4" | "picture" | "source" | "video"
-            | "a" | "kbd" | "blockquote" | "hr" | "center" | "font" | "u" | "s" | "del" => {}
+            "details" | "summary" | "sub" | "sup" | "span" | "table" | "tr" | "td" | "th" | "thead" | "tbody" | "ul" | "ol" | "li" | "h1" | "h2" | "h3"
+            | "h4" | "picture" | "source" | "video" | "a" | "kbd" | "blockquote" | "hr" | "center" | "font" | "u" | "s" | "del" => {}
             _ => out.push_str(&rest[i..i + j + 1]),
         }
         rest = &rest[i + j + 1..];
@@ -405,9 +384,7 @@ pub fn parse_pr_ref(input: &str, default_repo: Option<&str>) -> Option<(String, 
         // github.com/owner/repo/pull/123, maybe with /files or #comment after.
         let mut parts = s[i + "github.com/".len()..].split(['/', '#', '?']);
         let (owner, repo, kind, n) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
-        return (kind == "pull" && !owner.is_empty() && !repo.is_empty())
-            .then(|| Some((format!("{owner}/{repo}"), n.parse().ok()?)))
-            .flatten();
+        return (kind == "pull" && !owner.is_empty() && !repo.is_empty()).then(|| Some((format!("{owner}/{repo}"), n.parse().ok()?))).flatten();
     }
     if let Some((repo, n)) = s.split_once('#').filter(|(r, _)| r.contains('/')) {
         return Some((repo.trim().to_string(), n.trim().parse().ok()?));
@@ -486,9 +463,6 @@ mod tests {
         let md = clean_markdown(
             "Report:\n<table>\n<thead><tr><th>Name</th><th align=\"right\">Count</th></tr></thead>\n<tr><td>a|b</td><td>1<br>2</td></tr>\n<tr><td><a href=\"u\">x</a></td></tr>\n</table>\nend",
         );
-        assert_eq!(
-            md,
-            "Report:\n\n| Name | Count |\n| --- | ---: |\n| a\\|b | 1<br>2 |\n| [x](u) |  |\n\nend\n"
-        );
+        assert_eq!(md, "Report:\n\n| Name | Count |\n| --- | ---: |\n| a\\|b | 1<br>2 |\n| [x](u) |  |\n\nend\n");
     }
 }

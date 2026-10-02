@@ -1,0 +1,80 @@
+# Tag a version (git tag v0.2.0 && git push --tags) and this builds the
+# downloads and publishes a GitHub release. The Homebrew tap picks the new
+# version up from that release.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    name: macOS app (universal)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - name: Build for Apple silicon and Intel
+        run: |
+          cargo build --release --target aarch64-apple-darwin
+          cargo build --release --target x86_64-apple-darwin
+          mkdir -p target/universal
+          lipo -create -output target/universal/github-prs \
+            target/aarch64-apple-darwin/release/github-prs \
+            target/x86_64-apple-darwin/release/github-prs
+      - name: Bundle the app
+        run: BIN=target/universal/github-prs scripts/bundle-macos.sh --no-install
+      - name: Zip it
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          ditto -c -k --keepParent "target/release/GitHub PRs.app" "GitHub-PRs-$version-macos.zip"
+          shasum -a 256 "GitHub-PRs-$version-macos.zip" | tee "GitHub-PRs-$version-macos.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: GitHub-PRs-*
+
+  linux:
+    name: Linux binary (x86_64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release
+      - name: Tar it
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="github-prs-$version-linux-x86_64"
+          mkdir "$name"
+          cp target/release/github-prs README.md LICENSE "$name/"
+          tar czf "$name.tar.gz" "$name"
+          sha256sum "$name.tar.gz" | tee "$name.tar.gz.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: github-prs-*.tar.gz*
+
+  publish:
+    name: Publish the release
+    needs: [macos, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            GitHub-PRs-*
+            github-prs-*
+          generate_release_notes: true

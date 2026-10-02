@@ -1,3 +1,7 @@
 /target
 # Review screenshots
 /*.png
+# Flox local state
+/.flox/telemetry_id
+# Nix build output
+/result

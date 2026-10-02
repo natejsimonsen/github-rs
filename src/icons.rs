@@ -228,11 +228,7 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
                 color,
                 Stroke::NONE,
             ));
-            p.add(Shape::convex_polygon(
-                [(3.0, 7.5), (15.0, 7.5), (13.0, 13.25), (1.5, 13.25)].iter().map(|&(x, y)| at(x, y)).collect(),
-                color,
-                Stroke::NONE,
-            ));
+            p.add(Shape::convex_polygon([(3.0, 7.5), (15.0, 7.5), (13.0, 13.25), (1.5, 13.25)].iter().map(|&(x, y)| at(x, y)).collect(), color, Stroke::NONE));
         }
         Icon::Code => {
             line(&[(5.0, 4.5), (1.75, 8.0), (5.0, 11.5)]);

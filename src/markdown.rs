@@ -75,7 +75,11 @@ enum Span {
     /// A color emoji picture (an `emoji:` URI), drawn at text size.
     Emoji(String, Style),
     /// A normal picture. Paragraphs move these onto their own line.
-    Image { url: String, alt: String, link: Option<String> },
+    Image {
+        url: String,
+        alt: String,
+        link: Option<String>,
+    },
 }
 
 /// A run of styled text, like one paragraph.
@@ -146,15 +150,32 @@ enum Alert {
 enum Block {
     Para(Inline),
     Heading(u8, Inline),
-    Code { lang: String, text: String },
+    Code {
+        lang: String,
+        text: String,
+    },
     Quote(Vec<Block>),
     Alert(Alert, Vec<Block>),
-    List { start: Option<u64>, items: Vec<Item> },
+    List {
+        start: Option<u64>,
+        items: Vec<Item>,
+    },
     /// The first row is the header.
-    Table { align: Vec<Alignment>, rows: Vec<Vec<Inline>> },
-    Image { url: String, alt: String, link: Option<String> },
+    Table {
+        align: Vec<Alignment>,
+        rows: Vec<Vec<Inline>>,
+    },
+    Image {
+        url: String,
+        alt: String,
+        link: Option<String>,
+    },
     Rule,
-    Details { summary: Inline, open: bool, body: Vec<Block> },
+    Details {
+        summary: Inline,
+        open: bool,
+        body: Vec<Block>,
+    },
     Footnotes(Vec<Item>),
 }
 
@@ -167,11 +188,7 @@ struct Item {
 }
 
 fn options() -> Options {
-    Options::ENABLE_TABLES
-        | Options::ENABLE_TASKLISTS
-        | Options::ENABLE_STRIKETHROUGH
-        | Options::ENABLE_FOOTNOTES
-        | Options::ENABLE_GFM
+    Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_FOOTNOTES | Options::ENABLE_GFM
 }
 
 fn parse(source: &str) -> Vec<Block> {
@@ -240,14 +257,7 @@ struct Builder {
 
 impl Builder {
     fn style(&self) -> Style {
-        Style {
-            bold: self.bold > 0,
-            italic: self.italic > 0,
-            strike: self.strike > 0,
-            code: false,
-            note: false,
-            link: self.links.last().copied(),
-        }
+        Style { bold: self.bold > 0, italic: self.italic > 0, strike: self.strike > 0, code: false, note: false, link: self.links.last().copied() }
     }
 
     fn push(&mut self, block: Block) {
@@ -541,10 +551,7 @@ impl Builder {
         let mut rest = html;
         loop {
             let lower = rest.to_ascii_lowercase();
-            let next = ["<details", "</details", "<summary"]
-                .into_iter()
-                .filter_map(|t| lower.find(t).map(|i| (i, t)))
-                .min();
+            let next = ["<details", "</details", "<summary"].into_iter().filter_map(|t| lower.find(t).map(|i| (i, t))).min();
             let Some((i, tag)) = next else {
                 self.html_text(rest);
                 return;
@@ -735,8 +742,7 @@ impl Render {
                     // smaller fonts would ride high. Shorten their line and
                     // push them to the bottom to share the base baseline.
                     let drop = base_asc - asc;
-                    let (line_height, valign) =
-                        if drop > 0.0 && !st.note { (base.line - drop, Align::BOTTOM) } else { (base.line, Align::TOP) };
+                    let (line_height, valign) = if drop > 0.0 && !st.note { (base.line - drop, Align::BOTTOM) } else { (base.line, Align::TOP) };
                     let color = if st.link.is_some() { self.p.accent } else { base.color };
                     let format = TextFormat {
                         font_id: font(mono, bold, size),
@@ -811,10 +817,7 @@ impl Render {
         let mut hovered = None;
         if interactive {
             let resp = ui.interact(rect, id, Sense::click_and_drag() - Sense::FOCUSABLE);
-            hovered = resp
-                .hover_pos()
-                .and_then(|p| char_at(galley, p - gpos))
-                .and_then(|c| runs.links.iter().find(|(r, _)| r.contains(&c)).map(|(_, l)| *l));
+            hovered = resp.hover_pos().and_then(|p| char_at(galley, p - gpos)).and_then(|c| runs.links.iter().find(|(r, _)| r.contains(&c)).map(|(_, l)| *l));
             LabelSelectionState::label_text_selection(ui, &resp, gpos, galley.clone(), self.color, Stroke::NONE);
             if let Some(url) = hovered.and_then(|l| links.get(l)) {
                 ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
@@ -828,11 +831,7 @@ impl Render {
         }
 
         // Inline code: a rounded, padded background under the text.
-        let code_bg = if self.p.dark {
-            Color32::from_rgba_unmultiplied(101, 108, 118, 51)
-        } else {
-            Color32::from_rgba_unmultiplied(129, 139, 152, 31)
-        };
+        let code_bg = if self.p.dark { Color32::from_rgba_unmultiplied(101, 108, 118, 51) } else { Color32::from_rgba_unmultiplied(129, 139, 152, 31) };
         let pad = 0.4 * runs.code_size;
         let mut shapes = Vec::new();
         for range in &runs.code {
@@ -1163,11 +1162,7 @@ impl Render {
         let avail = ui.available_width() - cols as f32 * 2.0 * pad_x - 1.0;
         // Short columns ("✔️ Pass") keep their whole width when squeezed;
         // only the long ones wrap, like in a browser.
-        let short: Vec<bool> = if max_w.iter().sum::<f32>() <= avail {
-            vec![false; cols]
-        } else {
-            max_w.iter().map(|&w| w <= avail / cols as f32).collect()
-        };
+        let short: Vec<bool> = if max_w.iter().sum::<f32>() <= avail { vec![false; cols] } else { max_w.iter().map(|&w| w <= avail / cols as f32).collect() };
         let fixed: f32 = (0..cols).filter(|&c| short[c]).map(|c| max_w[c]).sum();
         let (sum_min, sum_max) = (0..cols).filter(|&c| !short[c]).fold((0.0, 0.0), |(a, b), c| (a + min_w[c], b + max_w[c]));
         let room = avail - fixed;
@@ -1180,9 +1175,7 @@ impl Render {
         };
         // Rounded down when squeezed, so the table never ends a few px too wide.
         let round = |w: f32| if t < 1.0 { w.floor() } else { w.ceil() };
-        let widths: Vec<f32> = (0..cols)
-            .map(|c| if short[c] { max_w[c].ceil() } else { round(min_w[c] + (max_w[c] - min_w[c]) * t) } + 2.0 * pad_x)
-            .collect();
+        let widths: Vec<f32> = (0..cols).map(|c| if short[c] { max_w[c].ceil() } else { round(min_w[c] + (max_w[c] - min_w[c]) * t) } + 2.0 * pad_x).collect();
 
         // Lay out every cell at its column width.
         let mut cells = Vec::with_capacity(rows.len());
@@ -1269,10 +1262,7 @@ impl Render {
             Err(_) => {
                 // Private attachments need a browser session: link to them.
                 let name = if alt.trim().is_empty() { url.rsplit('/').next().unwrap_or(url) } else { alt };
-                let inl = Inline {
-                    spans: vec![Span::Text(name.to_string(), Style { link: Some(0), ..Style::default() })],
-                    links: vec![target.to_string()],
-                };
+                let inl = Inline { spans: vec![Span::Text(name.to_string(), Style { link: Some(0), ..Style::default() })], links: vec![target.to_string()] };
                 self.text(ui, id, &inl, self.base());
             }
         }
@@ -1334,21 +1324,8 @@ fn list_number(n: u64, depth: usize) -> String {
 }
 
 fn roman(mut n: u64) -> String {
-    const TABLE: [(u64, &str); 13] = [
-        (1000, "m"),
-        (900, "cm"),
-        (500, "d"),
-        (400, "cd"),
-        (100, "c"),
-        (90, "xc"),
-        (50, "l"),
-        (40, "xl"),
-        (10, "x"),
-        (9, "ix"),
-        (5, "v"),
-        (4, "iv"),
-        (1, "i"),
-    ];
+    const TABLE: [(u64, &str); 13] =
+        [(1000, "m"), (900, "cm"), (500, "d"), (400, "cd"), (100, "c"), (90, "xc"), (50, "l"), (40, "xl"), (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")];
     let mut s = String::new();
     for (v, r) in TABLE {
         while n >= v {
@@ -1357,6 +1334,18 @@ fn roman(mut n: u64) -> String {
         }
     }
     s
+}
+
+/// A scrollbar that stays put under content that overflows sideways, so
+/// it's clear there's more (egui's default fades out when idle).
+pub fn solid_bar(ui: &mut Ui) {
+    let mut scroll = egui::style::ScrollStyle::solid();
+    scroll.bar_width = 6.0;
+    scroll.bar_inner_margin = 4.0;
+    ui.spacing_mut().scroll = scroll;
+    // The handle needs to stand out from its track in light mode too.
+    let handle = if ui.visuals().dark_mode { egui::Color32::from_rgb(0x3d, 0x44, 0x4d) } else { egui::Color32::from_rgb(0xd1, 0xd9, 0xe0) };
+    ui.visuals_mut().widgets.inactive.bg_fill = handle;
 }
 
 #[cfg(test)]
@@ -1473,16 +1462,4 @@ mod tests {
         let b = parsed("cached *text*");
         assert!(Arc::ptr_eq(&a, &b));
     }
-}
-
-/// A scrollbar that stays put under content that overflows sideways, so
-/// it's clear there's more (egui's default fades out when idle).
-pub fn solid_bar(ui: &mut Ui) {
-    let mut scroll = egui::style::ScrollStyle::solid();
-    scroll.bar_width = 6.0;
-    scroll.bar_inner_margin = 4.0;
-    ui.spacing_mut().scroll = scroll;
-    // The handle needs to stand out from its track in light mode too.
-    let handle = if ui.visuals().dark_mode { egui::Color32::from_rgb(0x3d, 0x44, 0x4d) } else { egui::Color32::from_rgb(0xd1, 0xd9, 0xe0) };
-    ui.visuals_mut().widgets.inactive.bg_fill = handle;
 }

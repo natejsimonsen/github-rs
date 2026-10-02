@@ -3,6 +3,10 @@
 # the Dock and app launchers can open it.
 #
 # Usage: scripts/bundle-macos.sh [install-dir]   (default: /Applications)
+#
+# For release builds: BIN=path/to/github-prs scripts/bundle-macos.sh --no-install
+# wraps an already built binary (say, a universal one) and leaves the .app in
+# target/release without installing it.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -12,7 +16,10 @@ NAME="GitHub PRs"
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
 APP="target/release/$NAME.app"
 
-"$CARGO" build --release
+if [ -z "${BIN:-}" ]; then
+  "$CARGO" build --release
+  BIN="target/release/github-prs"
+fi
 "$CARGO" run --release --quiet --example make_icon -- target/release/icon.png
 
 # App icon: macOS wants one file holding several sizes.
@@ -25,7 +32,7 @@ done
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp target/release/github-prs "$APP/Contents/MacOS/"
+cp "$BIN" "$APP/Contents/MacOS/github-prs"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -47,8 +54,13 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Sign it for this Mac only (no Apple account needed), so macOS runs it.
+# Sign it with no identity (no Apple account needed), so macOS runs it.
 codesign --force --sign - "$APP"
+
+if [ "$DEST" = "--no-install" ]; then
+  echo "Built $APP"
+  exit 0
+fi
 
 mkdir -p "$DEST"
 rm -rf "$DEST/$NAME.app"

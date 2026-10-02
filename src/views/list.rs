@@ -1,7 +1,7 @@
 //! Left side: the github.com/pulls page. Filter buttons, search, and the list.
 
-use super::{avatar, plain_box, pr_icon, row_separator, status_icon};
 use super::Tip;
+use super::{avatar, plain_box, pr_icon, row_separator, status_icon};
 use crate::app::{Action, App, View};
 use crate::github::{PrDetail, PrSummary, SECTIONS};
 use crate::icons::{self, Icon};
@@ -27,11 +27,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     let known_empty = other_counts.is_some_and(|(o, c)| if app.closed { c == 0 } else { o == 0 });
     plain_box(ui, |ui| {
         // Box header: "44 Open   120 Closed"
-        egui::Frame::new()
-            .fill(p.canvas_subtle)
-            .corner_radius(CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 })
-            .inner_margin(Margin::symmetric(8, 8))
-            .show(ui, |ui| {
+        egui::Frame::new().fill(p.canvas_subtle).corner_radius(CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }).inner_margin(Margin::symmetric(8, 8)).show(
+            ui,
+            |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
@@ -52,7 +50,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         }
                     });
                 });
-            });
+            },
+        );
         row_separator(ui);
 
         if let Some(e) = &error {
@@ -201,7 +200,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 /// "12 Open" / "34 Closed" in the list header: icon and text are one button.
 fn state_toggle(ui: &mut Ui, p: &Palette, icon: Icon, text: &str, active: bool) -> egui::Response {
     let font = if active { theme::bold(14.0) } else { theme::body(14.0) };
-    let (rect, resp) = ui.allocate_exact_size(vec2(ui.painter().layout_no_wrap(text.to_string(), font.clone(), p.fg).size().x + 16.0 + 6.0 + 16.0, 32.0), Sense::click());
+    let (rect, resp) =
+        ui.allocate_exact_size(vec2(ui.painter().layout_no_wrap(text.to_string(), font.clone(), p.fg).size().x + 16.0 + 6.0 + 16.0, 32.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, text));
     let color = if active || resp.hovered() { p.fg } else { p.fg_muted };
     let g = ui.painter().layout_no_wrap(text.to_string(), font, color);
@@ -241,68 +241,68 @@ pub fn rail(app: &mut App, ui: &mut Ui) {
         let shown_id = egui::Id::new("rail-shown-selection");
         let shown: Option<String> = ui.ctx().data(|d| d.get_temp(shown_id));
         egui::ScrollArea::vertical().id_salt("pr-rail").scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
-        ui.spacing_mut().item_spacing.y = 4.0;
-        for pr in &rows {
-            let selected = app.selected.as_ref().is_some_and(|s| s.id == pr.id);
-            let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
-            // A new selection (keys, ⌘K) scrolls into view, once.
-            if selected && shown.as_deref() != Some(pr.id.as_str()) {
-                resp.scroll_to_me(None);
-                ui.ctx().data_mut(|d| d.insert_temp(shown_id, pr.id.clone()));
-            }
-            resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, format!("#{} {}", pr.number, pr.title)));
-            if selected {
-                ui.painter().rect_filled(rect, 6.0, p.selected_row);
-                let bar = Rect::from_min_size(pos2(rect.left() - 6.0, rect.top() + 6.0), vec2(2.0, rect.height() - 12.0));
-                ui.painter().rect_filled(bar, 1.0, p.accent_emphasis);
-            } else if resp.hovered() {
-                // The rail sits on canvas_subtle, so hover needs a stronger tint.
-                ui.painter().rect_filled(rect, 6.0, p.border.gamma_multiply(0.45));
-            }
-            let (icon, color, _) = pr_icon(&pr.state, pr.is_draft, p);
-            icons::paint(ui.painter(), rect.shrink(10.0), icon, color);
-            // A small dot shows merge readiness at a glance.
-            // The dot is merge readiness (not CI), same color as the list's chip.
-            let detail = fresher_detail(app, pr);
-            let status = row_status(p, pr, detail.as_deref()).filter(|m| m.short != "Checking" && m.short != "Draft");
-            if let Some(ms) = &status {
-                let at = rect.right_bottom() - vec2(8.0, 8.0);
-                if ms.short == "Conflicts" {
-                    // A ring, so it reads differently from "Blocked" at a glance.
-                    ui.painter().circle(at, 4.0, p.canvas_subtle, Stroke::new(2.0, ms.color));
-                } else {
-                    ui.painter().circle(at, 4.0, ms.color, Stroke::new(1.5, p.canvas_subtle));
+            ui.spacing_mut().item_spacing.y = 4.0;
+            for pr in &rows {
+                let selected = app.selected.as_ref().is_some_and(|s| s.id == pr.id);
+                let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
+                // A new selection (keys, ⌘K) scrolls into view, once.
+                if selected && shown.as_deref() != Some(pr.id.as_str()) {
+                    resp.scroll_to_me(None);
+                    ui.ctx().data_mut(|d| d.insert_temp(shown_id, pr.id.clone()));
+                }
+                resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, format!("#{} {}", pr.number, pr.title)));
+                if selected {
+                    ui.painter().rect_filled(rect, 6.0, p.selected_row);
+                    let bar = Rect::from_min_size(pos2(rect.left() - 6.0, rect.top() + 6.0), vec2(2.0, rect.height() - 12.0));
+                    ui.painter().rect_filled(bar, 1.0, p.accent_emphasis);
+                } else if resp.hovered() {
+                    // The rail sits on canvas_subtle, so hover needs a stronger tint.
+                    ui.painter().rect_filled(rect, 6.0, p.border.gamma_multiply(0.45));
+                }
+                let (icon, color, _) = pr_icon(&pr.state, pr.is_draft, p);
+                icons::paint(ui.painter(), rect.shrink(10.0), icon, color);
+                // A small dot shows merge readiness at a glance.
+                // The dot is merge readiness (not CI), same color as the list's chip.
+                let detail = fresher_detail(app, pr);
+                let status = row_status(p, pr, detail.as_deref()).filter(|m| m.short != "Checking" && m.short != "Draft");
+                if let Some(ms) = &status {
+                    let at = rect.right_bottom() - vec2(8.0, 8.0);
+                    if ms.short == "Conflicts" {
+                        // A ring, so it reads differently from "Blocked" at a glance.
+                        ui.painter().circle(at, 4.0, p.canvas_subtle, Stroke::new(2.0, ms.color));
+                    } else {
+                        ui.painter().circle(at, 4.0, ms.color, Stroke::new(1.5, p.canvas_subtle));
+                    }
+                }
+                let tip = match &status {
+                    Some(ms) => format!("{}#{} {}\n{}", pr.repository.name_with_owner, pr.number, pr.title, ms.short),
+                    None => format!("{}#{} {}", pr.repository.name_with_owner, pr.number, pr.title),
+                };
+                super::tip(&resp, &tip);
+                let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+                if resp.clicked() {
+                    app.actions.push(Action::Select(pr.clone()));
                 }
             }
-            let tip = match &status {
-                Some(ms) => format!("{}#{} {}\n{}", pr.repository.name_with_owner, pr.number, pr.title, ms.short),
-                None => format!("{}#{} {}", pr.repository.name_with_owner, pr.number, pr.title),
-            };
-            super::tip(&resp, &tip);
-            let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
-            if resp.clicked() {
-                app.actions.push(Action::Select(pr.clone()));
+            // More pages: "+N" loads the next one.
+            if let Some(total) = more {
+                let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Load more"));
+                if resp.hovered() {
+                    ui.painter().rect_filled(rect, 6.0, p.border.gamma_multiply(0.45));
+                }
+                if busy {
+                    egui::Spinner::new().size(16.0).paint_at(ui, Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
+                } else {
+                    let left = total.saturating_sub(rows.len() as u64);
+                    let label = if left > 99 { "+99".to_string() } else { format!("+{left}") };
+                    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, theme::bold(12.0), p.fg_muted);
+                }
+                super::tip(&resp, &format!("Showing {} of {total} · Load more", rows.len()));
+                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                    app.actions.push(Action::LoadMore);
+                }
             }
-        }
-        // More pages: "+N" loads the next one.
-        if let Some(total) = more {
-            let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
-            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Load more"));
-            if resp.hovered() {
-                ui.painter().rect_filled(rect, 6.0, p.border.gamma_multiply(0.45));
-            }
-            if busy {
-                egui::Spinner::new().size(16.0).paint_at(ui, Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
-            } else {
-                let left = total.saturating_sub(rows.len() as u64);
-                let label = if left > 99 { "+99".to_string() } else { format!("+{left}") };
-                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, theme::bold(12.0), p.fg_muted);
-            }
-            super::tip(&resp, &format!("Showing {} of {total} · Load more", rows.len()));
-            if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                app.actions.push(Action::LoadMore);
-            }
-        }
         });
     });
 }
@@ -311,9 +311,8 @@ pub fn rail(app: &mut App, ui: &mut Ui) {
 /// wrap: on a narrow list they tighten, then the rest go under "More ▾".
 fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
     let avail = ui.available_width();
-    let widths = |pad: f32| -> Vec<f32> {
-        SECTIONS.iter().map(|s| ui.painter().layout_no_wrap(s.title.to_string(), theme::bold(13.0), p.fg).size().x + pad).collect()
-    };
+    let widths =
+        |pad: f32| -> Vec<f32> { SECTIONS.iter().map(|s| ui.painter().layout_no_wrap(s.title.to_string(), theme::bold(13.0), p.fg).size().x + pad).collect() };
     let mut pad = 24.0;
     let mut w = widths(pad);
     if w.iter().sum::<f32>() > avail {
@@ -349,7 +348,13 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
                 ne: if i == n - 1 { 6 } else { 0 },
                 se: if i == n - 1 { 6 } else { 0 },
             };
-            let fill = if on { p.accent_emphasis } else if resp.hovered() { p.hover_row } else { p.canvas };
+            let fill = if on {
+                p.accent_emphasis
+            } else if resp.hovered() {
+                p.hover_row
+            } else {
+                p.canvas
+            };
             ui.painter().rect(rect, radius, fill, Stroke::new(1.0, if on { p.accent_emphasis } else { p.border }), StrokeKind::Inside);
             ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, theme::bold(13.0), if on { Color32::WHITE } else { p.fg });
             resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, text));
@@ -371,10 +376,10 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
                 ui.spacing_mut().item_spacing.y = 0.0;
                 // Room for the check mark only when a hidden section is active.
                 let text_x = if hidden_active.is_some() { 36.0 } else { 12.0 };
-                for i in shown..SECTIONS.len() {
+                for (i, section) in SECTIONS.iter().enumerate().skip(shown) {
                     let on = active == Some(i);
                     let (r, row) = ui.allocate_exact_size(vec2(188.0, 32.0), Sense::click());
-                    row.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, SECTIONS[i].title));
+                    row.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, section.title));
                     if row.hovered() {
                         ui.painter().rect_filled(r.shrink2(vec2(4.0, 0.0)), 6.0, p.hover_row);
                     }
@@ -503,7 +508,7 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     let text_w = (width - left - right).max(80.0);
 
     // "owner/repo Title": one run of text, so it wraps naturally. The
-    // repo's hyphens can't break (U+2011), so "ZR-Private" stays whole.
+    // repo's hyphens can't break (U+2011), so "my-org" stays whole.
     let repo_name = pr.repository.name_with_owner.replace('-', "\u{2011}");
     let ci = match detail {
         Some(d) if !d.checks.is_empty() => Some(super::CheckSummary::of(&d.checks).state()),
@@ -620,7 +625,11 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     // Merge readiness, e.g. "● Ready to merge", once GitHub has worked it out.
     if let Some(ms) = row_status(p, pr, detail).filter(|m| m.short != "Checking" && m.short != "Draft") {
         // No-break spaces: the chip moves to the next line whole.
-        meta_job.append(&format!(" ●\u{a0}{}", ms.short.replace(' ', "\u{a0}").replace('-', "\u{2011}")), 0.0, egui::TextFormat { font_id: theme::bold(12.0), color: ms.color, ..Default::default() });
+        meta_job.append(
+            &format!(" ●\u{a0}{}", ms.short.replace(' ', "\u{a0}").replace('-', "\u{2011}")),
+            0.0,
+            egui::TextFormat { font_id: theme::bold(12.0), color: ms.color, ..Default::default() },
+        );
     }
     let meta_g = ui.painter().layout_job(meta_job);
 
@@ -687,7 +696,13 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
         let r = Rect::from_min_size(pos2(left, origin.y), vec2(20.0, 20.0));
         if who.len() > 1 {
             // A ring in the row's color separates overlapping faces.
-            let bg = if selected { p.selected_row } else if resp.hovered() { p.hover_row } else { p.canvas };
+            let bg = if selected {
+                p.selected_row
+            } else if resp.hovered() {
+                p.hover_row
+            } else {
+                p.canvas
+            };
             ui.painter().circle_filled(r.center(), 11.5, bg);
         }
         let mut child = ui.new_child(egui::UiBuilder::new().max_rect(r));

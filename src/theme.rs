@@ -182,12 +182,7 @@ pub fn visuals(p: &Palette) -> Visuals {
     // Menus and popups: Primer's overlay look.
     v.menu_corner_radius = 12.into();
     v.window_corner_radius = 12.into();
-    v.popup_shadow = egui::epaint::Shadow {
-        offset: [0, 8],
-        blur: 24,
-        spread: 0,
-        color: Color32::from_black_alpha(if p.dark { 150 } else { 45 }),
-    };
+    v.popup_shadow = egui::epaint::Shadow { offset: [0, 8], blur: 24, spread: 0, color: Color32::from_black_alpha(if p.dark { 150 } else { 45 }) };
     v.window_fill = p.overlay;
     v
 }

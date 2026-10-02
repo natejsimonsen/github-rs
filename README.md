@@ -46,40 +46,98 @@ column next to the conversation, and the file list next to the diff. Click the
 panel icon, use the shortcut, or drag a panel's edge closed. The app remembers
 what you left open.
 
-## Build and run
+## Install
 
-1. Install Rust from https://rustup.rs (one command; it installs `cargo`).
-   If `cargo` isn't found afterward, add it to your shell path:
-   `echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc` and open a new terminal.
-2. Build and start the app:
+Pick one. Each gives you the same app.
 
-   ```sh
-   cd ~/Code/github-rs
-   cargo run --release
-   ```
+**macOS, with Homebrew** (an app in /Applications, Apple silicon and Intel):
 
-   The first build takes about 2 minutes. Later builds take seconds.
-   The finished program is `target/release/github-prs`. You can copy it anywhere
-   and run it directly.
+```sh
+brew install --cask --no-quarantine natejsimonsen/tap/github-prs
+```
 
-3. **Optional, macOS:** install it as a normal app, so you can open it from
-   Spotlight, Launchpad, the Dock, or any app launcher:
+`--no-quarantine` matters: the app is signed without an Apple developer
+account, so without it macOS blocks the first launch. If you forget, open it
+once from System Settings > Privacy & Security > Open Anyway.
+Update later with `brew upgrade --cask github-prs`.
 
-   ```sh
-   scripts/bundle-macos.sh
-   ```
+**macOS or Linux, with [Flox](https://flox.dev)**:
 
-   This builds `GitHub PRs.app` (with its icon) into `/Applications`. Run it
-   again after you change the code. To install somewhere else, pass a folder:
-   `scripts/bundle-macos.sh ~/Applications`.
+```sh
+flox install github:natejsimonsen/github-rs
+```
 
-Use `--release` for everyday use. Plain `cargo run` also works and is still
-fast, because the project optimizes its libraries even in debug builds.
+This builds the app from source the first time (a few minutes) and puts
+`github-prs` on your path. Run it with `github-prs`.
 
-**Linux** also needs a C compiler and window-system headers, e.g. on Ubuntu:
-`sudo apt install build-essential libxkbcommon-dev libwayland-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev`.
-**Windows** needs the Visual Studio C++ build tools (rustup offers to install them).
-Windows and Linux builds have not been tested yet.
+**macOS or Linux, with Nix** (flakes enabled):
+
+```sh
+nix profile install github:natejsimonsen/github-rs
+# or try it without installing:
+nix run github:natejsimonsen/github-rs
+```
+
+**Download**: every release on the
+[Releases page](https://github.com/natejsimonsen/github-rs/releases) has a
+zipped `GitHub PRs.app` for macOS and a Linux x86_64 binary, with checksums.
+
+**From source, with Cargo** (any OS):
+
+```sh
+cargo install --git https://github.com/natejsimonsen/github-rs
+```
+
+Linux needs a C compiler and the window-system libraries at run time
+(`libxkbcommon`, `wayland` or X11, `libGL` or Vulkan), e.g. on Ubuntu:
+`sudo apt install build-essential libxkbcommon0 libwayland-client0 libgl1 libvulkan1`.
+Windows needs the Visual Studio C++ build tools (rustup offers to install them).
+Windows and Linux builds compile in CI but haven't been used day to day yet.
+
+## Develop
+
+Clone the repo, then get a toolchain one of these ways:
+
+- **Flox**: `flox activate` gives you cargo, rustc, clippy, rustfmt and
+  rust-analyzer, plus the Linux libraries. Leave with `exit`.
+- **Nix**: `nix develop` does the same.
+- **rustup**: install from https://rustup.rs. If `cargo` isn't found afterward,
+  add it to your shell: `echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.zshrc`
+  and open a new terminal.
+
+Then:
+
+```sh
+cargo run --release
+```
+
+The first build takes about 2 minutes. Later builds take seconds. The
+finished program is `target/release/github-prs`. Plain `cargo run` also works
+and is still fast, because the project optimizes its libraries even in debug
+builds.
+
+**macOS app bundle**: `scripts/bundle-macos.sh` builds `GitHub PRs.app` (with
+its icon) into `/Applications`, so Spotlight and the Dock can open it. Run it
+again after you change the code. To install somewhere else, pass a folder:
+`scripts/bundle-macos.sh ~/Applications`.
+
+**Checks before you push**: CI runs `cargo fmt --check`,
+`cargo clippy --all-targets --features snapshot -- -D warnings`, `cargo test`,
+a release build on macOS, Linux and Windows, and `nix build` on macOS and
+Linux.
+
+**Releasing**: bump `version` in `Cargo.toml`, commit, then
+
+```sh
+git tag v0.2.0 && git push --tags
+```
+
+The Release workflow builds a universal macOS app and a Linux binary and
+publishes them on the Releases page. The Homebrew tap
+([natejsimonsen/homebrew-tap](https://github.com/natejsimonsen/homebrew-tap))
+checks for new releases every few hours and updates its cask; run its
+"Update cask" workflow to do it right away. Flox and Nix always build from
+the latest commit on `main`.
 
 ## Signing in
 
@@ -158,6 +216,9 @@ On Windows and Linux, use `Ctrl` instead of `⌘`. Double-click a PR to open it 
 | `src/snapshot.rs` | Offscreen screenshots for UI reviews (optional feature) |
 | `scripts/bundle-macos.sh` | Builds and installs the macOS `.app` |
 | `examples/make_icon.rs` | Draws the app icon |
+| `flake.nix`, `nix/` | Nix package and dev shell (Flox installs from these) |
+| `.flox/` | Flox dev environment |
+| `.github/workflows/` | CI and release pipelines |
 
 ## Developer switches
 

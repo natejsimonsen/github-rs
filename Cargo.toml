@@ -3,6 +3,8 @@ name = "github-prs"
 version = "0.1.0"
 edition = "2024"
 description = "A fast desktop app for GitHub pull requests"
+license = "MIT"
+repository = "https://github.com/natejsimonsen/github-rs"
 
 [dependencies]
 # UI: egui draws the whole interface on the GPU (Metal on macOS, DX12/Vulkan on Windows/Linux).

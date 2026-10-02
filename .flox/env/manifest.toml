@@ -1,0 +1,58 @@
+# Flox development environment: `flox activate`, then `cargo run --release`.
+# To install the finished app instead, see README.md.
+schema-version = "1.14.0"
+
+[install]
+cargo.pkg-path = "cargo"
+cargo.pkg-group = "rust-toolchain"
+rustc.pkg-path = "rustc"
+rustc.pkg-group = "rust-toolchain"
+clippy.pkg-path = "clippy"
+clippy.pkg-group = "rust-toolchain"
+rustfmt.pkg-path = "rustfmt"
+rustfmt.pkg-group = "rust-toolchain"
+rust-lib-src.pkg-path = "rustPlatform.rustLibSrc"
+rust-lib-src.pkg-group = "rust-toolchain"
+rust-analyzer.pkg-path = "rust-analyzer"
+rust-analyzer.pkg-group = "rust-analyzer"
+
+# A C compiler, for the tree-sitter grammars.
+gcc.pkg-path = "gcc"
+gcc.systems = ["aarch64-linux", "x86_64-linux"]
+clang.pkg-path = "clang"
+clang.systems = ["aarch64-darwin", "x86_64-darwin"]
+libiconv.pkg-path = "libiconv"
+libiconv.systems = ["aarch64-darwin", "x86_64-darwin"]
+
+# Linux window system and GPU libraries. The app opens them at run time.
+libxkbcommon.pkg-path = "libxkbcommon"
+libxkbcommon.systems = ["aarch64-linux", "x86_64-linux"]
+wayland.pkg-path = "wayland"
+wayland.systems = ["aarch64-linux", "x86_64-linux"]
+libGL.pkg-path = "libGL"
+libGL.systems = ["aarch64-linux", "x86_64-linux"]
+vulkan-loader.pkg-path = "vulkan-loader"
+vulkan-loader.systems = ["aarch64-linux", "x86_64-linux"]
+libX11.pkg-path = "xorg.libX11"
+libX11.systems = ["aarch64-linux", "x86_64-linux"]
+libXcursor.pkg-path = "xorg.libXcursor"
+libXcursor.systems = ["aarch64-linux", "x86_64-linux"]
+libXi.pkg-path = "xorg.libXi"
+libXi.systems = ["aarch64-linux", "x86_64-linux"]
+libXrandr.pkg-path = "xorg.libXrandr"
+libXrandr.systems = ["aarch64-linux", "x86_64-linux"]
+
+[vars]
+
+[hook]
+on-activate = '''
+  # Linux: let a locally built app find the libraries above.
+  if [ "$(uname)" = Linux ]; then
+    export LD_LIBRARY_PATH="$FLOX_ENV/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+  fi
+'''
+
+[profile]
+
+[options]
+systems = ["aarch64-darwin", "x86_64-darwin", "aarch64-linux", "x86_64-linux"]

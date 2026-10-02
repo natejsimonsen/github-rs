@@ -20,9 +20,9 @@
 //! Nothing is ever sent to GitHub that would change it: writes are blocked.
 
 use crate::app::App;
-use egui::{Key, Modifiers, Pos2, PointerButton};
-use egui_kittest::kittest::Queryable;
+use egui::{Key, Modifiers, PointerButton, Pos2};
 use egui_kittest::Harness;
+use egui_kittest::kittest::Queryable;
 use std::time::{Duration, Instant};
 
 pub fn run(path: &str) {
@@ -140,9 +140,9 @@ fn keys(s: &str) -> (Modifiers, Key) {
     let mut key = Key::Escape;
     for part in s.split('+') {
         match part.to_ascii_lowercase().as_str() {
-            "cmd" | "command" | "ctrl" => mods = mods | Modifiers::COMMAND,
-            "shift" => mods = mods | Modifiers::SHIFT,
-            "alt" | "option" => mods = mods | Modifiers::ALT,
+            "cmd" | "command" | "ctrl" => mods |= Modifiers::COMMAND,
+            "shift" => mods |= Modifiers::SHIFT,
+            "alt" | "option" => mods |= Modifiers::ALT,
             "enter" | "return" => key = Key::Enter,
             "esc" | "escape" => key = Key::Escape,
             "end" => key = Key::End,

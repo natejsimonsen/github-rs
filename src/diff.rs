@@ -1,11 +1,11 @@
 //! "Files changed" view. Diffs can have tens of thousands of lines, so we
 //! compute every row's position once, then draw only the rows on screen.
 
-use crate::views::Tip;
 use crate::app::{Action, App, Panel};
 use crate::github::FileDiff;
 use crate::icons::{self, Icon};
 use crate::theme::{self, Palette};
+use crate::views::Tip;
 use egui::{Align2, CornerRadius, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -31,7 +31,12 @@ enum Kind {
 
 enum Row {
     Header(usize, bool),
-    Line { kind: Kind, old: Option<u32>, new: Option<u32>, text: String },
+    Line {
+        kind: Kind,
+        old: Option<u32>,
+        new: Option<u32>,
+        text: String,
+    },
     Note(String),
     /// The rounded bottom edge of a file's box. The file's sideways
     /// scrollbar lives here.
@@ -39,7 +44,13 @@ enum Row {
     Gap,
     /// A hunk header (or the end of the file) with hidden lines next to it.
     /// Clicking shows more. `hidden` is None when we don't know yet.
-    Expander { file: usize, idx: usize, hidden: Option<u32>, kind: Expand, text: String },
+    Expander {
+        file: usize,
+        idx: usize,
+        hidden: Option<u32>,
+        kind: Expand,
+        text: String,
+    },
 }
 
 impl Row {
@@ -176,9 +187,7 @@ fn highlight_rows(rows: &[Row], row_file: &[usize], files: &[FileDiff]) -> Vec<O
         }
         if let Some(lang) = files.get(fi).and_then(|f| crate::syntax::lang_for_diff(&f.filename, f.patch.as_deref().unwrap_or(""))) {
             for side in [Kind::Add, Kind::Del] {
-                let idx: Vec<usize> = (i..j)
-                    .filter(|&k| matches!(&rows[k], Row::Line { kind, .. } if *kind == side || *kind == Kind::Ctx))
-                    .collect();
+                let idx: Vec<usize> = (i..j).filter(|&k| matches!(&rows[k], Row::Line { kind, .. } if *kind == side || *kind == Kind::Ctx)).collect();
                 let texts: Vec<&str> = idx
                     .iter()
                     .map(|&k| match &rows[k] {
@@ -365,11 +374,7 @@ fn shift_hunk_header(line: &str, up: u32) -> String {
 /// "@@ -12,7 +12,9 @@" -> (12, 12)
 fn hunk_start(line: &str) -> (u32, u32) {
     let num = |prefix: char| -> u32 {
-        line.split_whitespace()
-            .find(|p| p.starts_with(prefix))
-            .and_then(|p| p[1..].split(',').next())
-            .and_then(|n| n.parse().ok())
-            .unwrap_or(1)
+        line.split_whitespace().find(|p| p.starts_with(prefix)).and_then(|p| p[1..].split(',').next()).and_then(|n| n.parse().ok()).unwrap_or(1)
     };
     (num('-'), num('+'))
 }
@@ -409,24 +414,21 @@ pub fn show(app: &mut App, ui: &mut Ui, pr_id: &str, files: Arc<Vec<FileDiff>>, 
         let top_left = ui.available_rect_before_wrap().min;
         let width = ui.available_width();
         let height = ui.available_height().max(200.0);
-        let area = egui::Area::new(egui::Id::new(("tree-overlay", pr_id)))
-            .order(egui::Order::Foreground)
-            .fixed_pos(top_left)
-            .show(ui.ctx(), |ui| {
-                egui::Frame::new()
-                    .fill(p.overlay)
-                    .stroke(Stroke::new(1.0, p.border))
-                    .corner_radius(8)
-                    .inner_margin(egui::Margin::same(12))
-                    .shadow(egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: egui::Color32::from_black_alpha(if p.dark { 160 } else { 50 }) })
-                    .show(ui, |ui| {
-                        ui.set_width(300.0f32.min(width * 0.45));
-                        ui.set_height(height - 24.0);
-                        tree_header(ui, p, &layout, &mut toggle);
-                        let current = ui.ctx().data(|d| d.get_temp::<usize>(current_id));
-                        file_tree(ui, p, &layout, jump_id, pr_id, current);
-                    });
-            });
+        let area = egui::Area::new(egui::Id::new(("tree-overlay", pr_id))).order(egui::Order::Foreground).fixed_pos(top_left).show(ui.ctx(), |ui| {
+            egui::Frame::new()
+                .fill(p.overlay)
+                .stroke(Stroke::new(1.0, p.border))
+                .corner_radius(8)
+                .inner_margin(egui::Margin::same(12))
+                .shadow(egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: egui::Color32::from_black_alpha(if p.dark { 160 } else { 50 }) })
+                .show(ui, |ui| {
+                    ui.set_width(300.0f32.min(width * 0.45));
+                    ui.set_height(height - 24.0);
+                    tree_header(ui, p, &layout, &mut toggle);
+                    let current = ui.ctx().data(|d| d.get_temp::<usize>(current_id));
+                    file_tree(ui, p, &layout, jump_id, pr_id, current);
+                });
+        });
         let picked = ui.ctx().data(|d| d.get_temp::<f32>(jump_id)).is_some();
         let clicked_outside = ui.input(|i| i.pointer.any_click() && i.pointer.interact_pos().is_some_and(|pos| !area.response.rect.contains(pos)));
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
@@ -718,7 +720,8 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
         );
         // The summary gives way ("…") before the viewed count does.
         let room = (ui.available_width() - 210.0).max(60.0);
-        let mut job = egui::text::LayoutJob::single_section(summary.clone(), egui::TextFormat { font_id: theme::body(13.0), color: p.fg_muted, ..Default::default() });
+        let mut job =
+            egui::text::LayoutJob::single_section(summary.clone(), egui::TextFormat { font_id: theme::body(13.0), color: p.fg_muted, ..Default::default() });
         job.wrap = egui::text::TextWrapping::truncate_at_width(room);
         let g = ui.painter().layout_job(job);
         let (r, resp) = ui.allocate_exact_size(g.size(), Sense::hover());
@@ -869,7 +872,10 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
                     let text_y = if *kind == Expand::UpDown { r.bottom() - LINE_H / 2.0 } else { r.center().y };
                     let code = Rect::from_min_max(pos2(r.left() + code_left, r.top()), pos2(r.right() - 8.0, r.bottom()));
                     // The @@ line stays put and ends in "…" rather than mid-letter.
-                    let mut job = egui::text::LayoutJob::single_section(text.clone(), egui::TextFormat { font_id: theme::mono(12.0), color: p.fg_muted, ..Default::default() });
+                    let mut job = egui::text::LayoutJob::single_section(
+                        text.clone(),
+                        egui::TextFormat { font_id: theme::mono(12.0), color: p.fg_muted, ..Default::default() },
+                    );
                     job.wrap = egui::text::TextWrapping::truncate_at_width((code.width() - 16.0).max(20.0));
                     let g = painter.layout_job(job);
                     let at = pos2(code.left() + 16.0, text_y - g.size().y / 2.0);
@@ -885,12 +891,12 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
         }
 
         // A thin scrollbar at the bottom of the visible part of each wide file.
-        for fi in 0..files.len() {
+        for (fi, &file_bottom) in layout.file_bottoms.iter().enumerate().take(files.len()) {
             let max = (file_w(fi) - code_w).max(0.0);
-            if max <= 0.0 || layout.file_bottoms.get(fi).is_none() {
+            if max <= 0.0 {
                 continue;
             }
-            let (top, bottom) = (layout.file_tops[fi] + HEADER_H, layout.file_bottoms[fi]);
+            let (top, bottom) = (layout.file_tops[fi] + HEADER_H, file_bottom);
             if bottom < viewport.min.y || top > viewport.max.y || bottom - top < 30.0 {
                 continue;
             }
@@ -907,7 +913,13 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
                 painter.rect_filled(Rect::from_x_y_ranges(card, (track.top() - 3.0)..=(track.bottom() + 3.0)), 0.0, p.canvas);
             }
             // Always a faint thumb, so wide files show they scroll.
-            let alpha = if resp.dragged() { 0.7 } else if strong { 0.45 } else { 0.2 };
+            let alpha = if resp.dragged() {
+                0.7
+            } else if strong {
+                0.45
+            } else {
+                0.2
+            };
             painter.rect_filled(thumb, 3.0, p.fg_muted.gamma_multiply(alpha));
             if resp.dragged() {
                 let per_px = max / (track.width() - thumb_w).max(1.0);
@@ -1049,10 +1061,12 @@ fn unfold_arrow(painter: &egui::Painter, c: egui::Pos2, dir: Expand, color: egui
 /// The sides and rounded bottom of a box, as one line.
 fn rounded_bottom(painter: &egui::Painter, r: Rect, radius: f32, stroke: Stroke) {
     let arc = |cx: f32, cy: f32, from: f32, to: f32| -> Vec<egui::Pos2> {
-        (0..=6).map(|i| {
-            let a = from + (to - from) * i as f32 / 6.0;
-            pos2(cx + radius * a.cos(), cy + radius * a.sin())
-        }).collect()
+        (0..=6)
+            .map(|i| {
+                let a = from + (to - from) * i as f32 / 6.0;
+                pos2(cx + radius * a.cos(), cy + radius * a.sin())
+            })
+            .collect()
     };
     use std::f32::consts::PI;
     let mut pts = vec![pos2(r.left(), r.top())];

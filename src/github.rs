@@ -2,8 +2,8 @@
 //! REST for per-file diffs and for posting comments and reviews.
 
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use serde_json::{Value, json};
+use std::sync::Arc;
 use std::time::Duration;
 
 const API: &str = "https://api.github.com";
@@ -66,9 +66,7 @@ impl From<ureq::Error> for Error {
 /// checked with the OS trust store, so corporate proxies with custom root
 /// certificates work.
 pub fn http_agent() -> ureq::Agent {
-    let tls = ureq::tls::TlsConfig::builder()
-        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-        .build();
+    let tls = ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build();
     ureq::Agent::config_builder()
         .http_status_as_error(false)
         .timeout_global(Some(Duration::from_secs(60)))
@@ -370,7 +368,9 @@ pub enum Reviewer {
         #[serde(rename = "avatarUrl")]
         avatar_url: String,
     },
-    Team { name: String },
+    Team {
+        name: String,
+    },
     Other {},
 }
 
@@ -622,8 +622,7 @@ impl Client {
             .header("Authorization", format!("bearer {}", self.token))
             .send_json(json!({ "query": query, "variables": vars }))?;
         let body = Self::read(resp)?;
-        let mut v: Value =
-            serde_json::from_str(&body).map_err(|e| Error::Other(format!("Bad JSON: {e}")))?;
+        let mut v: Value = serde_json::from_str(&body).map_err(|e| Error::Other(format!("Bad JSON: {e}")))?;
         if let Some(errs) = v.get("errors").and_then(|e| e.as_array()) {
             // GitHub returns partial data with errors (for example when an
             // org blocks the token). Only fail if there's no data at all.
@@ -648,7 +647,8 @@ impl Client {
 
     /// A file's full text at a commit, for expanding diff context.
     pub fn file_text(&self, repo: &str, path: &str, git_ref: &str) -> Result<String> {
-        let path: String = path.split('/').map(|p| p.replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3F")).collect::<Vec<_>>().join("/");
+        let path: String =
+            path.split('/').map(|p| p.replace('%', "%25").replace(' ', "%20").replace('#', "%23").replace('?', "%3F")).collect::<Vec<_>>().join("/");
         let resp = self
             .agent
             .get(format!("{API}/repos/{repo}/contents/{path}?ref={git_ref}"))
@@ -716,12 +716,7 @@ impl Client {
             row.review_decision = extra["reviewDecision"].as_str().map(str::to_string);
             row.commits = summary_commits(&extra["commits"]);
         }
-        Ok(ListResult {
-            open: data["open"]["issueCount"].as_u64().unwrap_or(0),
-            closed: data["closed"]["issueCount"].as_u64().unwrap_or(0),
-            rows,
-            next: None,
-        })
+        Ok(ListResult { open: data["open"]["issueCount"].as_u64().unwrap_or(0), closed: data["closed"]["issueCount"].as_u64().unwrap_or(0), rows, next: None })
     }
 
     /// One PR by repo and number, with everything a list row shows.
@@ -749,8 +744,7 @@ impl Client {
                 None => format!("No pull request {repo}#{number}, or you don't have access to it."),
             }));
         }
-        let mut pr: PrSummary =
-            serde_json::from_value(node.clone()).map_err(|e| Error::Other(format!("Unexpected response: {e}")))?;
+        let mut pr: PrSummary = serde_json::from_value(node.clone()).map_err(|e| Error::Other(format!("Unexpected response: {e}")))?;
         pr.commits = summary_commits(&node["commits"]);
         pr.auto_merge = !node["autoMergeRequest"].is_null();
         Ok(pr)
@@ -839,8 +833,7 @@ query($id: ID!) { node(id: $id) { ... on PullRequest {
         let mut data = self.graphql(Q, json!({ "id": id }))?;
         let node = data["node"].take();
         let checks = parse_checks(&node["head"]);
-        let mut d: PrDetail = serde_json::from_value(node)
-            .map_err(|e| Error::Other(format!("Unexpected response: {e}")))?;
+        let mut d: PrDetail = serde_json::from_value(node).map_err(|e| Error::Other(format!("Unexpected response: {e}")))?;
         d.checks = checks;
         Ok(d)
     }
@@ -892,10 +885,10 @@ query($id: ID!) { node(id: $id) { ... on PullRequest {
             let data = self.graphql(Q, json!({ "owner": owner, "name": name, "n": number, "after": after }))?;
             let files = &data["repository"]["pullRequest"]["files"];
             for n in files["nodes"].as_array().into_iter().flatten() {
-                if n["viewerViewedState"] == "VIEWED" {
-                    if let Some(p) = n["path"].as_str() {
-                        out.insert(p.to_string());
-                    }
+                if n["viewerViewedState"] == "VIEWED"
+                    && let Some(p) = n["path"].as_str()
+                {
+                    out.insert(p.to_string());
                 }
             }
             if files["pageInfo"]["hasNextPage"] != true {
@@ -909,11 +902,8 @@ query($id: ID!) { node(id: $id) { ... on PullRequest {
     fn file_diffs(&self, repo: &str, number: u64) -> Result<Vec<FileDiff>> {
         let mut out = Vec::new();
         for page in 1..=30 {
-            let body = self.rest_get(&format!(
-                "/repos/{repo}/pulls/{number}/files?per_page=100&page={page}"
-            ))?;
-            let batch: Vec<FileDiff> = serde_json::from_str(&body)
-                .map_err(|e| Error::Other(format!("Unexpected response: {e}")))?;
+            let body = self.rest_get(&format!("/repos/{repo}/pulls/{number}/files?per_page=100&page={page}"))?;
+            let batch: Vec<FileDiff> = serde_json::from_str(&body).map_err(|e| Error::Other(format!("Unexpected response: {e}")))?;
             let done = batch.len() < 100;
             out.extend(batch);
             if done {
@@ -943,17 +933,11 @@ query($id: ID!) { node(id: $id) { ... on PullRequest {
     }
 
     pub fn ready_for_review(&self, pr_id: &str) -> Result<()> {
-        self.mutate(
-            "mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }",
-            json!({ "id": pr_id }),
-        )
+        self.mutate("mutation($id: ID!) { markPullRequestReadyForReview(input: { pullRequestId: $id }) { clientMutationId } }", json!({ "id": pr_id }))
     }
 
     pub fn close_pull_request(&self, pr_id: &str) -> Result<()> {
-        self.mutate(
-            "mutation($id: ID!) { closePullRequest(input: { pullRequestId: $id }) { clientMutationId } }",
-            json!({ "id": pr_id }),
-        )
+        self.mutate("mutation($id: ID!) { closePullRequest(input: { pullRequestId: $id }) { clientMutationId } }", json!({ "id": pr_id }))
     }
 
     /// Answer in a conversation on a line of code.
@@ -1010,10 +994,7 @@ query($id: ID!) { node(id: $id) { ... on PullRequest {
     }
 
     pub fn disable_auto_merge(&self, pr_id: &str) -> Result<()> {
-        self.mutate(
-            "mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }",
-            json!({ "id": pr_id }),
-        )
+        self.mutate("mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }", json!({ "id": pr_id }))
     }
 
     pub fn comment(&self, repo: &str, number: u64, body: &str) -> Result<()> {
@@ -1069,26 +1050,18 @@ fn summary_commits(v: &Value) -> Nodes<CommitNode<HeadCommit>> {
     let mut out: Nodes<CommitNode<HeadCommit>> = serde_json::from_value(v.clone()).unwrap_or_default();
     let contexts = &v["nodes"][0]["commit"]["statusCheckRollup"]["contexts"];
     let complete = contexts["pageInfo"]["hasNextPage"] == Value::Bool(false);
-    if let (Some(nodes), Some(rollup), true) = (
-        contexts["nodes"].as_array(),
-        out.nodes.first_mut().and_then(|n| n.commit.status_check_rollup.as_mut()),
-        complete,
-    ) {
-        if matches!(rollup.state.as_str(), "FAILURE" | "ERROR") {
-            let s = |v: &Value| v.as_str().map(str::to_string);
-            let rank = nodes
-                .iter()
-                .map(|n| parse_check(n, s))
-                .filter(|c| !is_policy_bot(&c.name))
-                .map(|c| crate::views::check_rank(&c.result))
-                .min();
-            rollup.state = match rank {
-                Some(0) => "FAILURE",
-                Some(1) => "PENDING",
-                _ => "SUCCESS",
-            }
-            .into();
+    if let (Some(nodes), Some(rollup), true) =
+        (contexts["nodes"].as_array(), out.nodes.first_mut().and_then(|n| n.commit.status_check_rollup.as_mut()), complete)
+        && matches!(rollup.state.as_str(), "FAILURE" | "ERROR")
+    {
+        let s = |v: &Value| v.as_str().map(str::to_string);
+        let rank = nodes.iter().map(|n| parse_check(n, s)).filter(|c| !is_policy_bot(&c.name)).map(|c| crate::views::check_rank(&c.result)).min();
+        rollup.state = match rank {
+            Some(0) => "FAILURE",
+            Some(1) => "PENDING",
+            _ => "SUCCESS",
         }
+        .into();
     }
     out
 }
@@ -1134,5 +1107,3 @@ fn parse_check(n: &Value, s: impl Fn(&Value) -> Option<String>) -> Check {
         }
     }
 }
-
-

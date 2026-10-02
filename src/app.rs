@@ -19,28 +19,73 @@ const PREFETCH_WORKERS: usize = 3;
 pub enum Msg {
     Token(Option<(String, Source)>),
     Viewer(github::Result<String>),
-    List { key: String, result: github::Result<ListResult>, stale: bool },
+    List {
+        key: String,
+        result: github::Result<ListResult>,
+        stale: bool,
+    },
     /// Fast first pass of a list: rows without labels, avatars or CI yet.
-    ListRows { key: String, result: github::Result<(Vec<PrSummary>, Option<String>)> },
+    ListRows {
+        key: String,
+        result: github::Result<(Vec<PrSummary>, Option<String>)>,
+    },
     /// Merge status for list rows: (id, mergeStateStatus, auto-merge on).
-    ListMerge { key: String, result: github::Result<Vec<(String, Option<String>, bool)>> },
+    ListMerge {
+        key: String,
+        result: github::Result<Vec<(String, Option<String>, bool)>>,
+    },
     /// The next page of a list, to add to its end.
-    ListMore { key: String, result: github::Result<ListResult> },
-    Detail { id: String, result: github::Result<PrDetail>, stale: bool },
-    Files { id: String, result: github::Result<Vec<FileDiff>>, stale: bool },
+    ListMore {
+        key: String,
+        result: github::Result<ListResult>,
+    },
+    Detail {
+        id: String,
+        result: github::Result<PrDetail>,
+        stale: bool,
+    },
+    Files {
+        id: String,
+        result: github::Result<Vec<FileDiff>>,
+        stale: bool,
+    },
     /// One commit with its diff, keyed by `CommitPage::key`.
-    Commit { key: String, result: github::Result<CommitDetail> },
-    Posted { id: String, result: github::Result<()>, what: &'static str },
+    Commit {
+        key: String,
+        result: github::Result<CommitDetail>,
+    },
+    Posted {
+        id: String,
+        result: github::Result<()>,
+        what: &'static str,
+    },
     /// A PR looked up from the ⌘K box. `seq` drops replies to old requests.
-    Found { seq: u64, result: github::Result<PrSummary> },
+    Found {
+        seq: u64,
+        result: github::Result<PrSummary>,
+    },
     /// A file's full text, for showing more diff context.
-    FileText { pr_id: String, path: String, result: github::Result<String> },
+    FileText {
+        pr_id: String,
+        path: String,
+        result: github::Result<String>,
+    },
     /// GitHub's emoji list (name -> picture URL).
     Emojis(github::Result<HashMap<String, String>>),
     /// Reply to answering or resolving a review thread.
-    Thread { pr_id: String, thread: String, result: github::Result<()>, what: &'static str },
+    Thread {
+        pr_id: String,
+        thread: String,
+        result: github::Result<()>,
+        what: &'static str,
+    },
     /// Reply to ticking a file's "Viewed" box.
-    Viewed { id: String, path: String, viewed: bool, result: github::Result<()> },
+    Viewed {
+        id: String,
+        path: String,
+        viewed: bool,
+        result: github::Result<()>,
+    },
 }
 
 #[derive(Default)]
@@ -397,21 +442,15 @@ impl App {
             was_focused: true,
             started: Instant::now(),
             perf: std::env::var_os("GITHUB_PRS_PERF").is_some(),
-            shot_scroll: std::env::var("GITHUB_PRS_SCREENSHOT").ok().and_then(|_| {
-                std::env::var("GITHUB_PRS_SCROLL").ok().map(|v| if v == "bottom" { f32::MAX } else { v.parse().unwrap_or(0.0) })
-            }),
-            shot: std::env::var("GITHUB_PRS_SCREENSHOT")
+            shot_scroll: std::env::var("GITHUB_PRS_SCREENSHOT")
                 .ok()
-                .map(|path| Screenshot { path, requested: false, selected: false, staged: false }),
+                .and_then(|_| std::env::var("GITHUB_PRS_SCROLL").ok().map(|v| if v == "bottom" { f32::MAX } else { v.parse().unwrap_or(0.0) })),
+            shot: std::env::var("GITHUB_PRS_SCREENSHOT").ok().map(|path| Screenshot { path, requested: false, selected: false, staged: false }),
         };
         let mut app = app;
         if app.shot.is_some() {
             let collapse = std::env::var("GITHUB_PRS_COLLAPSE").unwrap_or_default();
-            app.panels = Panels {
-                list: !collapse.contains("list"),
-                details: !collapse.contains("details"),
-                tree: !collapse.contains("tree"),
-            };
+            app.panels = Panels { list: !collapse.contains("list"), details: !collapse.contains("details"), tree: !collapse.contains("tree") };
         }
         match std::env::var("GITHUB_PRS_THEME").as_deref() {
             Ok("dark") => cc.egui_ctx.set_theme(egui::Theme::Dark),
@@ -502,11 +541,9 @@ impl App {
         let closed = self.closed;
         let ctx = self.ctx.clone();
         self.spawn(move |c, tx| {
-            if first_time {
-                if let Some(cached) = cache::load::<ListResult>(&key) {
-                    let _ = tx.send(Msg::List { key: key.clone(), result: Ok(cached), stale: true });
-                    ctx.request_repaint();
-                }
+            if first_time && let Some(cached) = cache::load::<ListResult>(&key) {
+                let _ = tx.send(Msg::List { key: key.clone(), result: Ok(cached), stale: true });
+                ctx.request_repaint();
             }
             let (rows, next) = match c.search(view.query(), closed, first, None) {
                 Ok(page) => page,
@@ -543,11 +580,9 @@ impl App {
             let (id, ctx) = (id.clone(), self.ctx.clone());
             self.spawn(move |c, tx| {
                 let key = format!("detail-{id}");
-                if first_time {
-                    if let Some(cached) = cache::load::<PrDetail>(&key) {
-                        let _ = tx.send(Msg::Detail { id: id.clone(), result: Ok(cached), stale: true });
-                        ctx.request_repaint();
-                    }
+                if first_time && let Some(cached) = cache::load::<PrDetail>(&key) {
+                    let _ = tx.send(Msg::Detail { id: id.clone(), result: Ok(cached), stale: true });
+                    ctx.request_repaint();
                 }
                 let result = c.detail(&id);
                 if let Ok(d) = &result {
@@ -564,11 +599,9 @@ impl App {
             let ctx = self.ctx.clone();
             self.spawn(move |c, tx| {
                 let key = format!("files-{id}");
-                if first_time {
-                    if let Some(cached) = cache::load::<Vec<FileDiff>>(&key) {
-                        let _ = tx.send(Msg::Files { id: id.clone(), result: Ok(cached), stale: true });
-                        ctx.request_repaint();
-                    }
+                if first_time && let Some(cached) = cache::load::<Vec<FileDiff>>(&key) {
+                    let _ = tx.send(Msg::Files { id: id.clone(), result: Ok(cached), stale: true });
+                    ctx.request_repaint();
                 }
                 let result = c.files(&repo, number);
                 if let Ok(f) = &result {
@@ -583,12 +616,8 @@ impl App {
     /// A few workers share one queue, so prefetching never floods GitHub,
     /// and PRs you click are fetched directly instead of waiting in line.
     fn prefetch(&mut self, rows: &[PrSummary]) {
-        let todo: std::collections::VecDeque<PrSummary> = rows
-            .iter()
-            .take(PREFETCH)
-            .filter(|p| !self.details.contains_key(&p.id) && self.prefetched.insert(p.id.clone()))
-            .cloned()
-            .collect();
+        let todo: std::collections::VecDeque<PrSummary> =
+            rows.iter().take(PREFETCH).filter(|p| !self.details.contains_key(&p.id) && self.prefetched.insert(p.id.clone())).cloned().collect();
         if todo.is_empty() {
             return;
         }
@@ -703,19 +732,17 @@ impl App {
                     // The merge status arrives separately; don't lose it.
                     let new = Arc::make_mut(new);
                     for r in &mut new.rows {
-                        if r.merge_state_status.is_none() {
-                            if let Some(o) = old.rows.iter().find(|o| o.id == r.id) {
-                                r.merge_state_status = o.merge_state_status.clone();
-                                r.auto_merge = o.auto_merge;
-                            }
+                        if r.merge_state_status.is_none()
+                            && let Some(o) = old.rows.iter().find(|o| o.id == r.id)
+                        {
+                            r.merge_state_status = o.merge_state_status.clone();
+                            r.auto_merge = o.auto_merge;
                         }
                     }
                 }
-                if !stale {
-                    if let Some(d) = &entry.data {
-                        let (key, d) = (key.clone(), d.clone());
-                        std::thread::spawn(move || cache::store(&key, &*d));
-                    }
+                if !stale && let Some(d) = &entry.data {
+                    let (key, d) = (key.clone(), d.clone());
+                    std::thread::spawn(move || cache::store(&key, &*d));
                 }
                 let rows = entry.data.clone();
                 // The open and closed lists share one pair of totals, so the
@@ -809,9 +836,11 @@ impl App {
                 }
                 // GitHub computes merge status lazily: the first answer is
                 // often UNKNOWN while it works it out. Ask again shortly.
-                let unknown = result.as_ref().ok().filter(|d| d.state == "OPEN").is_some_and(|d| {
-                    matches!(d.merge_state_status.as_deref(), None | Some("UNKNOWN")) || d.mergeable == "UNKNOWN"
-                });
+                let unknown = result
+                    .as_ref()
+                    .ok()
+                    .filter(|d| d.state == "OPEN")
+                    .is_some_and(|d| matches!(d.merge_state_status.as_deref(), None | Some("UNKNOWN")) || d.mergeable == "UNKNOWN");
                 if !stale && unknown {
                     let tries = self.merge_retries.entry(id.clone()).or_insert(0);
                     *tries += 1;
@@ -840,8 +869,7 @@ impl App {
                 }
                 self.diff_layouts.remove(&id);
                 self.files.entry(id.clone()).or_default().apply(result, stale);
-                let pending: Vec<(String, bool)> =
-                    self.viewed_pending.iter().filter(|((i, _), _)| *i == id).map(|((_, p), v)| (p.clone(), *v)).collect();
+                let pending: Vec<(String, bool)> = self.viewed_pending.iter().filter(|((i, _), _)| *i == id).map(|((_, p), v)| (p.clone(), *v)).collect();
                 for (path, v) in pending {
                     self.patch_viewed(&id, &path, v);
                 }
@@ -1076,10 +1104,7 @@ impl App {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         (body, repo).hash(&mut h);
         let emojis = self.emojis.clone();
-        self.md_text
-            .entry(h.finish())
-            .or_insert_with(|| Arc::new(crate::gfm::to_markdown(&util::clean_markdown(body), repo, &emojis)))
-            .clone()
+        self.md_text.entry(h.finish()).or_insert_with(|| Arc::new(crate::gfm::to_markdown(&util::clean_markdown(body), repo, &emojis))).clone()
     }
 
     /// Run a merge-related request for the selected PR in the background.
@@ -1222,8 +1247,7 @@ impl App {
             Action::RunSearch(q) => {
                 // "is:pr is:open author:@me" -> Created, open. Anything else is a search.
                 let closed = q.split_whitespace().any(|t| t == "is:closed" || t == "is:merged");
-                let rest: Vec<&str> =
-                    q.split_whitespace().filter(|t| !matches!(*t, "is:pr" | "is:open" | "is:closed" | "archived:false")).collect();
+                let rest: Vec<&str> = q.split_whitespace().filter(|t| !matches!(*t, "is:pr" | "is:open" | "is:closed" | "archived:false")).collect();
                 let rest = rest.join(" ");
                 let view = match SECTIONS.iter().position(|s| s.query == rest) {
                     Some(i) => View::Section(i),
@@ -1255,9 +1279,12 @@ impl App {
                     return;
                 };
                 // Already loaded? Open it without asking GitHub.
-                let known = self.lists.values().filter_map(|l| l.data.as_ref()).flat_map(|l| l.rows.iter()).find(|p| {
-                    p.number == number && p.repository.name_with_owner.eq_ignore_ascii_case(&repo)
-                });
+                let known = self
+                    .lists
+                    .values()
+                    .filter_map(|l| l.data.as_ref())
+                    .flat_map(|l| l.rows.iter())
+                    .find(|p| p.number == number && p.repository.name_with_owner.eq_ignore_ascii_case(&repo));
                 if let Some(pr) = known.cloned() {
                     self.goto = None;
                     self.actions.push(Action::Select(pr));
@@ -1278,11 +1305,11 @@ impl App {
                 let key = (id.clone(), path.clone());
                 *self.expanded.entry(key.clone()).or_default().entry(idx).or_default() += amount;
                 self.diff_layouts.remove(&id);
-                if !self.file_texts.contains_key(&key) {
+                if let std::collections::hash_map::Entry::Vacant(e) = self.file_texts.entry(key) {
                     if head.is_empty() {
                         return;
                     }
-                    self.file_texts.insert(key, None);
+                    e.insert(None);
                     self.spawn(move |c, tx| {
                         let result = c.file_text(&repo, &path, &head);
                         let _ = tx.send(Msg::FileText { pr_id: id, path, result });
@@ -1420,10 +1447,8 @@ impl App {
             if escape && self.commit.is_some() && self.goto.is_none() && !(self.tree_narrow && self.tree_open_narrow) {
                 self.actions.push(Action::CloseCommit);
             }
-            if copy {
-                if let Some(pr) = &self.selected {
-                    self.actions.push(Action::Copy(pr.url.clone()));
-                }
+            if copy && let Some(pr) = &self.selected {
+                self.actions.push(Action::Copy(pr.url.clone()));
             }
             if down {
                 self.move_selection(1);
@@ -1464,33 +1489,34 @@ impl App {
                 };
                 self.goto = Some(GoTo { text, ..Default::default() });
                 self.actions.push(Action::GoTo);
-            } else if let Ok(text) = std::env::var("GITHUB_PRS_GOTO_TYPE") {
-                if list_ready {
-                    shot.selected = true;
-                    self.goto = Some(GoTo { text, ..Default::default() });
-                }
+            } else if let Ok(text) = std::env::var("GITHUB_PRS_GOTO_TYPE")
+                && list_ready
+            {
+                shot.selected = true;
+                self.goto = Some(GoTo { text, ..Default::default() });
             }
         }
-        if !shot.selected {
-            if let Some(rows) = rows.filter(|r| !r.rows.is_empty()) {
-                let i: usize = std::env::var("GITHUB_PRS_ROW").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
-                let pr = rows.rows[i.min(rows.rows.len() - 1)].clone();
-                self.tab = match std::env::var("GITHUB_PRS_TAB").as_deref() {
-                    Ok("commits") => Tab::Commits,
-                    Ok("checks") => Tab::Checks,
-                    Ok("files") => Tab::Files,
-                    _ => Tab::Conversation,
-                };
-                shot.selected = true;
-                self.actions.push(Action::Select(pr));
-            }
+        if !shot.selected
+            && let Some(rows) = rows.filter(|r| !r.rows.is_empty())
+        {
+            let i: usize = std::env::var("GITHUB_PRS_ROW").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+            let pr = rows.rows[i.min(rows.rows.len() - 1)].clone();
+            self.tab = match std::env::var("GITHUB_PRS_TAB").as_deref() {
+                Ok("commits") => Tab::Commits,
+                Ok("checks") => Tab::Checks,
+                Ok("files") => Tab::Files,
+                _ => Tab::Conversation,
+            };
+            shot.selected = true;
+            self.actions.push(Action::Select(pr));
         }
         let typing_only = self.goto.is_some() && std::env::var("GITHUB_PRS_GOTO_TYPE").is_ok();
-        let loaded = typing_only || self.selected.as_ref().is_some_and(|s| {
-            self.details.get(&s.id).is_some_and(|d| d.data.is_some() && !d.loading)
-                && !self.merge_retries.contains_key(&s.id)
-                && self.files.get(&s.id).is_some_and(|f| f.data.is_some())
-        });
+        let loaded = typing_only
+            || self.selected.as_ref().is_some_and(|s| {
+                self.details.get(&s.id).is_some_and(|d| d.data.is_some() && !d.loading)
+                    && !self.merge_retries.contains_key(&s.id)
+                    && self.files.get(&s.id).is_some_and(|f| f.data.is_some())
+            });
         // GITHUB_PRS_STATE=reply,quote,preview,open-resolved sets up those
         // views once the PR loads. Local only: nothing is sent to GitHub.
         if loaded && !shot.staged {
@@ -1510,10 +1536,10 @@ impl App {
                         self.actions.push(Action::OpenCommit(d.repository.name_with_owner.clone(), oid));
                     }
                 }
-                if state.contains("reply") {
-                    if let Some(t) = d.review_threads.nodes.iter().find(|t| t.viewer_can_reply) {
-                        self.thread_replies.insert(t.id.clone(), "Good catch, fixed in the next commit.".into());
-                    }
+                if state.contains("reply")
+                    && let Some(t) = d.review_threads.nodes.iter().find(|t| t.viewer_can_reply)
+                {
+                    self.thread_replies.insert(t.id.clone(), "Good catch, fixed in the next commit.".into());
                 }
                 if state.contains("quote") {
                     let body = d.comments.nodes.first().map(|c| c.body.clone()).unwrap_or_else(|| d.body.clone());

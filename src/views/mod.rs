@@ -31,10 +31,7 @@ pub fn main(app: &mut App, ui: &mut Ui) {
     egui::Panel::show_switched(
         ui,
         &mut open,
-        egui::Panel::left("list-rail")
-            .resizable(false)
-            .exact_size(52.0)
-            .frame(Frame::new().fill(p.canvas_subtle).inner_margin(Margin::symmetric(8, 12))),
+        egui::Panel::left("list-rail").resizable(false).exact_size(52.0).frame(Frame::new().fill(p.canvas_subtle).inner_margin(Margin::symmetric(8, 12))),
         egui::Panel::left("list")
             .resizable(true)
             .default_size(480.0f32.min(max))
@@ -55,12 +52,7 @@ pub fn main(app: &mut App, ui: &mut Ui) {
 fn header(app: &mut App, ui: &mut Ui, p: &Palette) {
     egui::Panel::top("header")
         .exact_size(52.0)
-        .frame(
-            Frame::new()
-                .fill(p.header)
-                .inner_margin(Margin::symmetric(16, 0))
-                .stroke(Stroke::new(1.0, p.border)),
-        )
+        .frame(Frame::new().fill(p.header).inner_margin(Margin::symmetric(16, 0)).stroke(Stroke::new(1.0, p.border)))
         .show(ui, |ui| {
             ui.horizontal_centered(|ui| {
                 let list_open = if app.narrow { app.list_open_narrow } else { app.panels.list };
@@ -80,11 +72,8 @@ fn header(app: &mut App, ui: &mut Ui, p: &Palette) {
                     if !app.viewer.is_empty() {
                         let url = format!("https://github.com/{}.png?size=64", app.viewer);
                         let r = avatar(ui, &url, 28.0);
-                        let r = r.interact(Sense::click()).tip(format!(
-                            "Signed in as {} ({})",
-                            app.viewer,
-                            app.auth_source.map(|s| s.describe()).unwrap_or("")
-                        ));
+                        let r =
+                            r.interact(Sense::click()).tip(format!("Signed in as {} ({})", app.viewer, app.auth_source.map(|s| s.describe()).unwrap_or("")));
                         r.context_menu(|ui| {
                             if ui.button("Sign out").clicked() {
                                 app.actions.push(Action::SignOut);
@@ -120,65 +109,48 @@ pub fn sign_in(app: &mut App, ui: &mut Ui) {
                 ui.label(RichText::new("Looking for your GitHub login…").color(p.fg_muted));
                 return;
             }
-            Frame::new()
-                .fill(p.canvas)
-                .stroke(Stroke::new(1.0, p.border))
-                .corner_radius(6)
-                .inner_margin(Margin::same(16))
-                .show(ui, |ui| {
-                    ui.set_width(340.0);
-                    ui.vertical(|ui| {
-                        if let Some(e) = &app.token_error {
-                            ui.label(RichText::new(e).color(p.closed).size(13.0));
-                            ui.add_space(8.0);
-                        }
-                        ui.label(
-                            RichText::new(
-                                "No gh CLI login or GH_TOKEN was found. Paste a personal access token with the repo and read:org scopes.",
-                            )
+            Frame::new().fill(p.canvas).stroke(Stroke::new(1.0, p.border)).corner_radius(6).inner_margin(Margin::same(16)).show(ui, |ui| {
+                ui.set_width(340.0);
+                ui.vertical(|ui| {
+                    if let Some(e) = &app.token_error {
+                        ui.label(RichText::new(e).color(p.closed).size(13.0));
+                        ui.add_space(8.0);
+                    }
+                    ui.label(
+                        RichText::new("No gh CLI login or GH_TOKEN was found. Paste a personal access token with the repo and read:org scopes.")
                             .size(13.0)
                             .color(p.fg_muted),
-                        );
-                        ui.add_space(10.0);
-                        ui.label(RichText::new("Personal access token").font(theme::bold(14.0)));
-                        let r = ui.add(
-                            egui::TextEdit::singleline(&mut app.token_input)
-                                .password(true)
-                                .desired_width(f32::INFINITY)
-                                .margin(vec2(8.0, 6.0)),
-                        );
-                        if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                            app.actions.push(Action::SubmitToken);
-                        }
-                        ui.add_space(12.0);
-                        let w = ui.available_width();
-                        if ui.add_sized([w, 32.0], primary_button("Sign in", p)).clicked() {
-                            app.actions.push(Action::SubmitToken);
-                        }
-                    });
+                    );
+                    ui.add_space(10.0);
+                    ui.label(RichText::new("Personal access token").font(theme::bold(14.0)));
+                    let r = ui.add(egui::TextEdit::singleline(&mut app.token_input).password(true).desired_width(f32::INFINITY).margin(vec2(8.0, 6.0)));
+                    if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        app.actions.push(Action::SubmitToken);
+                    }
+                    ui.add_space(12.0);
+                    let w = ui.available_width();
+                    if ui.add_sized([w, 32.0], primary_button("Sign in", p)).clicked() {
+                        app.actions.push(Action::SubmitToken);
+                    }
                 });
+            });
             ui.add_space(8.0);
             if ui.add(button("Use my gh login", p)).tip("Look for a gh CLI login or GH_TOKEN again").clicked() {
                 app.actions.push(Action::FindToken);
             }
             ui.add_space(16.0);
-            Frame::new()
-                .stroke(Stroke::new(1.0, p.border))
-                .corner_radius(6)
-                .inner_margin(Margin::same(14))
-                .show(ui, |ui| {
-                    ui.set_width(340.0);
-                    ui.vertical_centered(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Need a token?").size(13.0));
-                            if link(ui, "Create one on GitHub.", 13.0, p).clicked() {
-                                app.actions.push(Action::OpenUrl(
-                                    "https://github.com/settings/tokens/new?scopes=repo,read:org&description=GitHub%20PRs%20desktop".into(),
-                                ));
-                            }
-                        });
+            Frame::new().stroke(Stroke::new(1.0, p.border)).corner_radius(6).inner_margin(Margin::same(14)).show(ui, |ui| {
+                ui.set_width(340.0);
+                ui.vertical_centered(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Need a token?").size(13.0));
+                        if link(ui, "Create one on GitHub.", 13.0, p).clicked() {
+                            app.actions
+                                .push(Action::OpenUrl("https://github.com/settings/tokens/new?scopes=repo,read:org&description=GitHub%20PRs%20desktop".into()));
+                        }
                     });
                 });
+            });
         });
     });
 }
@@ -286,12 +258,12 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
     let p = theme::palette(ctx);
     let id = egui::Id::new("goto");
     let area = egui::Modal::default_area(id).anchor(egui::Align2::CENTER_TOP, vec2(0.0, 96.0));
-    let frame = Frame::new()
-        .fill(p.overlay)
-        .stroke(Stroke::new(1.0, p.border))
-        .corner_radius(12)
-        .inner_margin(Margin::same(0))
-        .shadow(egui::Shadow { offset: [0, 12], blur: 48, spread: 0, color: Color32::from_black_alpha(if p.dark { 180 } else { 70 }) });
+    let frame = Frame::new().fill(p.overlay).stroke(Stroke::new(1.0, p.border)).corner_radius(12).inner_margin(Margin::same(0)).shadow(egui::Shadow {
+        offset: [0, 12],
+        blur: 48,
+        spread: 0,
+        color: Color32::from_black_alpha(if p.dark { 180 } else { 70 }),
+    });
     let resp = egui::Modal::new(id).area(area).frame(frame).backdrop_color(p.backdrop).show(ctx, |ui| {
         ui.set_width(560.0);
         Frame::new().inner_margin(Margin::symmetric(16, 14)).show(ui, |ui| {
@@ -504,28 +476,23 @@ pub fn friendly_error(raw: &str) -> &'static str {
 /// Primer's red flash banner with a Retry button. Returns true on Retry.
 pub fn error_banner(ui: &mut Ui, p: &Palette, title: &str, raw: &str) -> bool {
     let mut retry = false;
-    Frame::new()
-        .fill(p.danger_subtle)
-        .stroke(Stroke::new(1.0, p.danger_border))
-        .corner_radius(6)
-        .inner_margin(Margin::symmetric(16, 12))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                icons::show(ui, Icon::X, 16.0, p.closed);
-                // The text wraps in what's left beside Retry.
-                let text_w = (ui.available_width() - 80.0).max(80.0);
-                ui.allocate_ui_with_layout(vec2(text_w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                    ui.set_width(text_w);
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.label(RichText::new(title).font(theme::bold(14.0)).color(p.fg));
-                    ui.label(RichText::new(friendly_error(raw)).size(13.0).color(p.fg_muted)).tip(raw);
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    retry = ui.add(button("Retry", p)).clicked();
-                });
+    Frame::new().fill(p.danger_subtle).stroke(Stroke::new(1.0, p.danger_border)).corner_radius(6).inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.horizontal(|ui| {
+            icons::show(ui, Icon::X, 16.0, p.closed);
+            // The text wraps in what's left beside Retry.
+            let text_w = (ui.available_width() - 80.0).max(80.0);
+            ui.allocate_ui_with_layout(vec2(text_w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(text_w);
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.label(RichText::new(title).font(theme::bold(14.0)).color(p.fg));
+                ui.label(RichText::new(friendly_error(raw)).size(13.0).color(p.fg_muted)).tip(raw);
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                retry = ui.add(button("Retry", p)).clicked();
             });
         });
+    });
     retry
 }
 
@@ -542,7 +509,8 @@ pub fn stale_note(ctx: &egui::Context, id: &str, raw: &str) -> bool {
             Frame::new().fill(p.canvas).stroke(Stroke::new(1.0, p.border)).corner_radius(6).inner_margin(Margin::symmetric(12, 6)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     icons::show(ui, Icon::Sync, 14.0, p.attention);
-                    ui.label(RichText::new("Couldn't refresh · showing saved data").size(12.0).color(p.fg_muted)).tip(format!("{}\n{raw}", friendly_error(raw)));
+                    ui.label(RichText::new("Couldn't refresh · showing saved data").size(12.0).color(p.fg_muted))
+                        .tip(format!("{}\n{raw}", friendly_error(raw)));
                     retry = link(ui, "Retry", 12.0, p).clicked();
                 });
             });
@@ -558,23 +526,22 @@ pub fn toast(app: &mut App, ctx: &egui::Context) {
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(250));
     let p = theme::palette(ctx);
-    egui::Area::new(egui::Id::new("toast"))
-        .anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -24.0))
-        .show(ctx, |ui| {
-            // Primer toast: dark in both themes, colored icon, white text.
-            Frame::new()
-                .fill(p.tooltip)
-                .corner_radius(6)
-                .inner_margin(Margin::symmetric(14, 10))
-                .shadow(egui::Shadow { offset: [0, 4], blur: 12, spread: 0, color: Color32::from_black_alpha(60) })
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        let (icon, color) = if t.error { (Icon::X, Color32::from_rgb(0xff, 0x81, 0x82)) } else { (Icon::Check, Color32::from_rgb(0x4a, 0xc2, 0x6b)) };
-                        icons::show(ui, icon, 16.0, color);
-                        ui.label(RichText::new(&t.text).color(Color32::WHITE).size(14.0));
-                    });
+    egui::Area::new(egui::Id::new("toast")).anchor(egui::Align2::CENTER_BOTTOM, vec2(0.0, -24.0)).show(ctx, |ui| {
+        // Primer toast: dark in both themes, colored icon, white text.
+        Frame::new()
+            .fill(p.tooltip)
+            .corner_radius(6)
+            .inner_margin(Margin::symmetric(14, 10))
+            .shadow(egui::Shadow { offset: [0, 4], blur: 12, spread: 0, color: Color32::from_black_alpha(60) })
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let (icon, color) =
+                        if t.error { (Icon::X, Color32::from_rgb(0xff, 0x81, 0x82)) } else { (Icon::Check, Color32::from_rgb(0x4a, 0xc2, 0x6b)) };
+                    icons::show(ui, icon, 16.0, color);
+                    ui.label(RichText::new(&t.text).color(Color32::WHITE).size(14.0));
                 });
-        });
+            });
+    });
 }
 
 // ---------- Shared widgets ----------
@@ -592,7 +559,8 @@ pub fn avatar_of(ui: &mut Ui, login: &str, url: &str, size: f32) -> egui::Respon
 
 fn avatar_rounded(ui: &mut Ui, url: &str, size: f32, radius: f32) -> egui::Response {
     let p = theme::palette(ui.ctx());
-    let shape = |rect: egui::Rect, fill: Color32, stroke: Stroke| egui::Shape::Rect(egui::epaint::RectShape::new(rect, radius, fill, stroke, egui::StrokeKind::Inside));
+    let shape =
+        |rect: egui::Rect, fill: Color32, stroke: Stroke| egui::Shape::Rect(egui::epaint::RectShape::new(rect, radius, fill, stroke, egui::StrokeKind::Inside));
     if url.is_empty() {
         // No GitHub account: a plain person, like GitHub's default avatar.
         let (rect, resp) = ui.allocate_exact_size(vec2(size, size), Sense::hover());
@@ -660,10 +628,7 @@ pub fn primary_button(text: &str, p: &Palette) -> egui::Button<'static> {
 }
 
 pub fn button(text: &str, p: &Palette) -> egui::Button<'static> {
-    egui::Button::new(RichText::new(text).font(theme::bold(14.0)).color(p.fg))
-        .fill(p.btn_bg)
-        .stroke(Stroke::new(1.0, p.border))
-        .corner_radius(6)
+    egui::Button::new(RichText::new(text).font(theme::bold(14.0)).color(p.fg)).fill(p.btn_bg).stroke(Stroke::new(1.0, p.border)).corner_radius(6)
 }
 
 /// `.tip("…")` on any response: a Primer tooltip instead of egui's.
@@ -736,17 +701,12 @@ fn tip_at(resp: &egui::Response, text: &str, side: Side) {
     } else {
         (egui::pos2(r.right(), r.bottom() + 6.0), egui::Align2::RIGHT_TOP)
     };
-    egui::Area::new(resp.id.with("tip"))
-        .order(egui::Order::Tooltip)
-        .fixed_pos(pos)
-        .pivot(pivot)
-        .interactable(false)
-        .show(&resp.ctx, |ui| {
-            Frame::new().fill(p.tooltip).corner_radius(4).inner_margin(Margin::symmetric(8, 4)).show(ui, |ui| {
-                ui.set_max_width(320.0);
-                ui.label(RichText::new(text).size(12.0).color(Color32::WHITE));
-            });
+    egui::Area::new(resp.id.with("tip")).order(egui::Order::Tooltip).fixed_pos(pos).pivot(pivot).interactable(false).show(&resp.ctx, |ui| {
+        Frame::new().fill(p.tooltip).corner_radius(4).inner_margin(Margin::symmetric(8, 4)).show(ui, |ui| {
+            ui.set_max_width(320.0);
+            ui.label(RichText::new(text).size(12.0).color(Color32::WHITE));
         });
+    });
 }
 
 /// A square button with just an icon. `label` is its tooltip and the name
@@ -801,13 +761,7 @@ pub fn link_styled(ui: &mut Ui, text: &str, font: egui::FontId, color: Color32) 
 }
 
 /// A bordered box with a gray header strip, like GitHub comment boxes.
-pub fn boxed<R>(
-    ui: &mut Ui,
-    header_fill: Color32,
-    border: Color32,
-    header: impl FnOnce(&mut Ui),
-    body: impl FnOnce(&mut Ui) -> R,
-) -> R {
+pub fn boxed<R>(ui: &mut Ui, header_fill: Color32, border: Color32, header: impl FnOnce(&mut Ui), body: impl FnOnce(&mut Ui) -> R) -> R {
     let fill = theme::palette(ui.ctx()).canvas;
     Frame::new()
         .fill(fill)
@@ -815,15 +769,11 @@ pub fn boxed<R>(
         .corner_radius(6)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            Frame::new()
-                .fill(header_fill)
-                .corner_radius(CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 })
-                .inner_margin(Margin::symmetric(16, 8))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.spacing_mut().item_spacing.y = 6.0;
-                    header(ui);
-                });
+            Frame::new().fill(header_fill).corner_radius(CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }).inner_margin(Margin::symmetric(16, 8)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.spacing_mut().item_spacing.y = 6.0;
+                header(ui);
+            });
             let r = ui.available_rect_before_wrap();
             ui.painter().line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, border));
             Frame::new()
@@ -891,9 +841,7 @@ pub fn merge_status(
     if state != "OPEN" {
         return None;
     }
-    let s = |icon, color, short: &'static str, title: &str, detail: String| {
-        Some(MergeStatus { icon, color, short, title: title.to_string(), detail })
-    };
+    let s = |icon, color, short: &'static str, title: &str, detail: String| Some(MergeStatus { icon, color, short, title: title.to_string(), detail });
     if draft || merge_state == Some("DRAFT") {
         return s(Icon::PrDraft, p.neutral, "Draft", "Draft — not ready to merge", "Mark it ready for review to merge.".into());
     }
@@ -903,10 +851,7 @@ pub fn merge_status(
             Some("REBASE") => "rebase and merge",
             _ => "merge",
         };
-        let by = auto_merge
-            .and_then(|a| a.enabled_by.as_ref())
-            .map(|a| format!(" · enabled by {}", a.login))
-            .unwrap_or_default();
+        let by = auto_merge.and_then(|a| a.enabled_by.as_ref()).map(|a| format!(" · enabled by {}", a.login)).unwrap_or_default();
         let waiting = if why.is_empty() {
             String::new()
         } else {
@@ -914,14 +859,32 @@ pub fn merge_status(
             let first = w.next().map(|c| c.to_lowercase().to_string()).unwrap_or_default();
             format!(" Waiting on: {first}{}", w.as_str())
         };
-        return s(Icon::AutoMerge, p.merged, "Auto-merge on", "Auto-merge enabled", format!("GitHub will {method} when all requirements are met{by}.{waiting}"));
+        return s(
+            Icon::AutoMerge,
+            p.merged,
+            "Auto-merge on",
+            "Auto-merge enabled",
+            format!("GitHub will {method} when all requirements are met{by}.{waiting}"),
+        );
     }
     match merge_state.unwrap_or("UNKNOWN") {
         "CLEAN" | "HAS_HOOKS" => s(Icon::Check, p.open, "Ready to merge", "Ready to merge", "All requirements are met.".into()),
-        "UNSTABLE" => s(Icon::Check, p.open, "Ready to merge", "Ready to merge", if why.is_empty() { "Some checks that aren't required are failing.".into() } else { why }),
+        "UNSTABLE" => s(
+            Icon::Check,
+            p.open,
+            "Ready to merge",
+            "Ready to merge",
+            if why.is_empty() { "Some checks that aren't required are failing.".into() } else { why },
+        ),
         "BEHIND" => s(Icon::Sync, p.attention, "Out of date", "Branch is out of date", "Update it with the base branch before merging.".into()),
         "DIRTY" => s(Icon::X, p.closed, "Conflicts", "Merge conflicts", "Resolve conflicts with the base branch before merging.".into()),
-        "BLOCKED" => s(Icon::X, p.closed, "Blocked", "Merging is blocked", if why.is_empty() { "GitHub reports a branch rule is blocking this merge.".into() } else { why }),
+        "BLOCKED" => s(
+            Icon::X,
+            p.closed,
+            "Blocked",
+            "Merging is blocked",
+            if why.is_empty() { "GitHub reports a branch rule is blocking this merge.".into() } else { why },
+        ),
         _ => s(Icon::Dot, p.fg_muted, "Checking", "Checking merge status…", "GitHub hasn't finished computing this yet.".into()),
     }
 }

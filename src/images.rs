@@ -46,11 +46,7 @@ impl BytesLoader for HttpLoader {
                 if !resp.status().is_success() {
                     return Err(format!("HTTP {}", resp.status()));
                 }
-                let mime = resp
-                    .headers()
-                    .get("content-type")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.to_string());
+                let mime = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).map(|s| s.to_string());
                 let mut body = resp.into_body();
                 let bytes = body.with_config().limit(20 * 1024 * 1024).read_to_vec().map_err(|e| e.to_string())?;
                 Ok((bytes.into(), mime))
@@ -106,13 +102,7 @@ impl egui::load::TextureLoader for EmojiLoader {
         egui::generate_loader_id!(EmojiLoader)
     }
 
-    fn load(
-        &self,
-        ctx: &egui::Context,
-        uri: &str,
-        options: egui::TextureOptions,
-        _size_hint: egui::load::SizeHint,
-    ) -> egui::load::TextureLoadResult {
+    fn load(&self, ctx: &egui::Context, uri: &str, options: egui::TextureOptions, _size_hint: egui::load::SizeHint) -> egui::load::TextureLoadResult {
         use egui::load::{ImagePoll, SizedTexture, TexturePoll};
         let Some(url) = uri.strip_prefix(crate::gfm::EMOJI_SCHEME) else { return Err(LoadError::NotSupported) };
         let size = egui::vec2(EMOJI_SIZE, EMOJI_SIZE);

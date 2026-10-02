@@ -1,5 +1,8 @@
 // Hide the console window on Windows release builds.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+// Messages and actions carry whole PR rows; a few hundred bytes copied on a
+// click isn't worth boxing them.
+#![allow(clippy::large_enum_variant)]
 
 mod app;
 mod auth;

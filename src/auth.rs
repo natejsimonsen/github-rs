@@ -37,10 +37,10 @@ impl Source {
 /// Try each source in order. The first token found wins.
 pub fn find_token() -> Option<(String, Source)> {
     for var in ["GH_TOKEN", "GITHUB_TOKEN"] {
-        if let Ok(t) = std::env::var(var) {
-            if !t.trim().is_empty() {
-                return Some((t.trim().to_string(), Source::Env));
-            }
+        if let Ok(t) = std::env::var(var)
+            && !t.trim().is_empty()
+        {
+            return Some((t.trim().to_string(), Source::Env));
         }
     }
     if let Some(t) = read_token_file() {
@@ -79,18 +79,14 @@ fn read_gh_keyring(account: &str) -> Option<String> {
 /// go-keyring may wrap the value as `go-keyring-base64:<base64>` or
 /// `go-keyring-encoded:<hex>`.
 fn decode_go_keyring(raw: &str) -> String {
-    if let Some(b64) = raw.strip_prefix("go-keyring-base64:") {
-        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) {
-            if let Ok(s) = String::from_utf8(bytes) {
-                return s.trim().to_string();
-            }
-        }
+    if let Some(b64) = raw.strip_prefix("go-keyring-base64:")
+        && let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64)
+        && let Ok(s) = String::from_utf8(bytes)
+    {
+        return s.trim().to_string();
     }
     if let Some(hex) = raw.strip_prefix("go-keyring-encoded:") {
-        let bytes: Option<Vec<u8>> = (0..hex.len())
-            .step_by(2)
-            .map(|i| hex.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok()))
-            .collect();
+        let bytes: Option<Vec<u8>> = (0..hex.len()).step_by(2).map(|i| hex.get(i..i + 2).and_then(|h| u8::from_str_radix(h, 16).ok())).collect();
         if let Some(s) = bytes.and_then(|b| String::from_utf8(b).ok()) {
             return s.trim().to_string();
         }
