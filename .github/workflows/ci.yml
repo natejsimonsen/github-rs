@@ -54,4 +54,4 @@ jobs:
       - uses: DeterminateSystems/nix-installer-action@main
       - run: nix flake check --no-build
       - run: nix build --print-build-logs
-      - run: ./result/bin/github-prs --version || true
+      - run: test -x result/bin/github-prs

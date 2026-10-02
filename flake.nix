@@ -32,6 +32,6 @@
         default = pkgs.callPackage ./nix/shell.nix { };
       });
 
-      formatter = forAll (pkgs: pkgs.nixfmt-rfc-style);
+      formatter = forAll (pkgs: pkgs.nixfmt);
     };
 }
