@@ -16,7 +16,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 
 # Networking and data.
 ureq = { version = "3", features = ["json", "platform-verifier"] }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 chrono = "0.4"
 base64 = "0.22"

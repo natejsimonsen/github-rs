@@ -5,8 +5,8 @@ use super::{
     primary_button, row_separator, status_icon,
 };
 use super::Tip;
-use crate::app::{Action, App, Panel, Tab};
-use crate::github::{Check, Comment, Event, EventCommit, PrDetail, PrSummary, Review, Reviewer, Thread};
+use crate::app::{Action, App, CommitPage, Panel, Tab};
+use crate::github::{Check, Comment, CommitDetail, Event, EventCommit, PrDetail, PrSummary, Review, Reviewer, Thread};
 use crate::icons::{self, Icon};
 use crate::theme::{self, Palette};
 use crate::{diff, util};
@@ -45,6 +45,19 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     // Same right edge as the scrolling content below (which leaves room
     // for its scrollbar).
     let full = ui.available_width();
+    if let Some(page) = app.commit.clone() {
+        // A commit's page: the PR's slim header and tabs stay, like GitHub's
+        // /pull/N/commits/sha, and the commit takes the rest.
+        app.details_folded = false;
+        ui.scope(|ui| {
+            ui.set_max_width(full - 14.0);
+            slim_header(ui, p, &sel, detail.as_deref());
+            tab_row(app, ui, p, detail.as_deref(), files.as_deref().map(|f| f.len()));
+        });
+        ui.add_space(8.0);
+        commit_page(app, ui, p, &page, detail.as_deref());
+        return;
+    }
     ui.scope(|ui| {
         ui.set_max_width(full - 14.0);
         header(app, ui, p, &sel, detail.as_deref(), files.as_deref().map(|f| f.len()));
@@ -87,7 +100,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     match app.tab {
         Tab::Files => match files {
             Some(f) => {
-                let src = diff::Source { repo: &d.repository.name_with_owner, head: &d.head_ref_oid };
+                let src = diff::Source { repo: &d.repository.name_with_owner, head: &d.head_ref_oid, commit: false };
                 diff::show(app, ui, &sel.id, f, src)
             }
             None => {
@@ -272,6 +285,7 @@ fn tab_row(app: &mut App, ui: &mut Ui, p: &Palette, d: Option<&PrDetail>, file_c
         (Tab::Checks, Icon::Checklist, "Checks", d.map(|d| d.checks.len() as u64)),
         (Tab::Files, Icon::FileDiff, "Files changed", file_count.map(|n| n as u64).or(d.map(|d| d.changed_files))),
     ];
+    let active = if app.commit.is_some() { Tab::Commits } else { app.tab };
     let row = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         // Room on the right: the Details toggle (when the sidebar is hidden)
@@ -284,7 +298,7 @@ fn tab_row(app: &mut App, ui: &mut Ui, p: &Palette, d: Option<&PrDetail>, file_c
             let w = |t: &str| ui.painter().layout_no_wrap(t.to_string(), theme::bold(13.0), p.fg).size().x;
             w(a) + w(r) + 50.0 + 12.0 + 16.0
         });
-        let natural = |compact: bool| tabs.iter().map(|(tab, _, text, count)| tab_width(ui, p, text, *count, app.tab == *tab, compact)).sum::<f32>();
+        let natural = |compact: bool| tabs.iter().map(|(tab, _, text, count)| tab_width(ui, p, text, *count, active == *tab, compact)).sum::<f32>();
         // The diffstat goes first; icons only when the tabs alone won't fit
         // (GitHub keeps them at normal widths).
         let compact = natural(false) + toggle_w > avail;
@@ -303,10 +317,10 @@ fn tab_row(app: &mut App, ui: &mut Ui, p: &Palette, d: Option<&PrDetail>, file_c
                     ui.spacing_mut().item_spacing.x = 0.0;
                     for (tab, icon, text, count) in tabs {
                         let text = if short && tab == Tab::Files { "Files" } else { text };
-                        let resp = tab_button(ui, p, icon, text, count, app.tab == tab, compact);
+                        let resp = tab_button(ui, p, icon, text, count, active == tab, compact);
                         // Keep the open tab in view when the row scrolls.
                         // Scroll a bit past it so the fade lands on a neighbor.
-                        if app.tab == tab && !ui.clip_rect().contains_rect(resp.rect) {
+                        if active == tab && !ui.clip_rect().contains_rect(resp.rect) {
                             ui.scroll_to_rect(resp.rect.expand2(vec2(40.0, 0.0)), None);
                         }
                         if resp.clicked() {
@@ -935,7 +949,7 @@ fn event_line(ui: &mut Ui, p: &Palette, icon: Icon, badge: Option<Color32>, who:
 
 fn sha_link(app: &mut App, ui: &mut Ui, p: &Palette, repo: &str, c: &EventCommit) {
     if link_styled(ui, &c.abbreviated_oid, theme::mono(13.0), p.fg).tip(&c.oid).clicked() {
-        app.actions.push(Action::OpenUrl(format!("https://github.com/{repo}/commit/{}", c.oid)));
+        app.actions.push(Action::OpenCommit(repo.to_string(), c.oid.clone()));
     }
 }
 
@@ -1073,7 +1087,7 @@ fn commits_row(app: &mut App, ui: &mut Ui, p: &Palette, commits: &[&EventCommit]
             }
             let resp = if cut { resp.tip_below(&c.message_headline) } else { resp };
             if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                app.actions.push(Action::OpenUrl(format!("https://github.com/{repo}/commit/{}", c.oid)));
+                app.actions.push(Action::OpenCommit(repo.to_string(), c.oid.clone()));
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 sha_link(app, ui, p, repo, c);
@@ -2231,8 +2245,8 @@ fn commits(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
     }
 }
 
-fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail, repo: &str, c: &crate::github::Commit, state: Option<&str>) {
-    let url = format!("{}/commits/{}", d.url, c.oid);
+fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, _d: &PrDetail, repo: &str, c: &crate::github::Commit, state: Option<&str>) {
+    let open = || Action::OpenCommit(repo.to_string(), c.oid.clone());
     egui::Frame::new().inner_margin(Margin::symmetric(16, 10)).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal_top(|ui| {
@@ -2261,7 +2275,7 @@ fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail, repo: &str,
                         }
                         let resp = if cut { resp.tip_below(&c.message_headline) } else { resp };
                         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                            app.actions.push(Action::OpenUrl(url.clone()));
+                            app.actions.push(open());
                         }
                         if has_body {
                             // "⋯" shows the rest of the commit message.
@@ -2312,7 +2326,7 @@ fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail, repo: &str,
                 ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, &c.abbreviated_oid, theme::mono(12.0), p.fg_muted);
                 super::tip(&resp, "View commit details");
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                    app.actions.push(Action::OpenUrl(url.clone()));
+                    app.actions.push(open());
                 }
                 if verified {
                     ui.add_space(4.0);
@@ -2531,4 +2545,167 @@ mod tests {
         assert_eq!(run(Format::Quote, "a\nb", 0, 3).0, "> a\n> b");
         assert_eq!(run(Format::Number, "one\ntwo", 1, 5).0, "1. one\n2. two");
     }
+}
+
+/// A commit's page: a way back, its message and author in a box, then its
+/// diff with the file tree.
+fn commit_page(app: &mut App, ui: &mut Ui, p: &Palette, page: &CommitPage, d: Option<&PrDetail>) {
+    let key = page.key();
+    let entry = app.commits.get(&key);
+    let data = entry.and_then(|c| c.data.clone());
+    let error = entry.and_then(|c| c.error.clone());
+    let full = ui.available_width();
+    ui.scope(|ui| {
+        ui.set_max_width(full - 14.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if link_styled(ui, "← Back to pull request", theme::body(13.0), p.accent).tip("Back (Esc)").clicked() {
+                app.actions.push(Action::CloseCommit);
+            }
+            // Prev / Next walk the PR's commits, like GitHub's commit pages.
+            let nodes = d.map(|d| &d.commits.nodes[..]).unwrap_or(&[]);
+            if let Some(i) = nodes.iter().position(|n| n.commit.oid == page.oid) {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let next = nodes.get(i + 1).map(|n| n.commit.oid.clone());
+                    let prev = i.checked_sub(1).map(|j| nodes[j].commit.oid.clone());
+                    if ui.add_enabled(next.is_some(), button("Next ›", p)).clicked() {
+                        app.actions.push(Action::OpenCommit(page.repo.clone(), next.unwrap_or_default()));
+                    }
+                    if ui.add_enabled(prev.is_some(), button("‹ Prev", p)).clicked() {
+                        app.actions.push(Action::OpenCommit(page.repo.clone(), prev.unwrap_or_default()));
+                    }
+                    ui.add_space(8.0);
+                    ui.label(RichText::new(format!("Commit {} of {}", i + 1, nodes.len())).size(13.0).color(p.fg_muted));
+                });
+            }
+        });
+        ui.add_space(8.0);
+        match &data {
+            Some(c) => commit_box(app, ui, p, c, page),
+            None => match &error {
+                Some(e) => {
+                    if super::error_banner(ui, p, "Couldn't load this commit.", e) {
+                        app.commits.remove(&key);
+                        app.actions.push(Action::OpenCommit(page.repo.clone(), page.oid.clone()));
+                    }
+                }
+                None => {
+                    ui.add_space(40.0);
+                    ui.vertical_centered(|ui| ui.add(egui::Spinner::new().size(24.0).color(p.fg_muted)));
+                }
+            },
+        }
+    });
+    if let Some(c) = data {
+        ui.add_space(12.0);
+        let src = diff::Source { repo: &page.repo, head: &c.sha, commit: true };
+        diff::show(app, ui, &key, c.files.clone(), src);
+    }
+}
+
+/// The box at the top of a commit's page: message, author, SHA and parents.
+fn commit_box(app: &mut App, ui: &mut Ui, p: &Palette, c: &CommitDetail, page: &CommitPage) {
+    let body_id = egui::Id::new(("commit-body", &c.sha));
+    let body_open = ui.ctx().data(|d| d.get_temp::<bool>(body_id)).unwrap_or(false);
+    let body = c.body();
+    let has_body = !body.is_empty();
+    plain_box(ui, |ui| {
+        egui::Frame::new().inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal_top(|ui| {
+                let right_w = 130.0;
+                let w = (ui.available_width() - right_w).max(120.0);
+                ui.allocate_ui(vec2(w, 0.0), |ui| {
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 8.0;
+                        ui.horizontal_top(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            let mut job = egui::text::LayoutJob::default();
+                            job.wrap.max_width = w - if has_body { 30.0 } else { 0.0 };
+                            super::append_title(&mut job, c.headline(), 16.0, true, 0.0, p);
+                            let g = ui.painter().layout_job(job);
+                            let (r, _) = ui.allocate_exact_size(g.size(), Sense::hover());
+                            ui.painter().galley(r.min, g, p.fg);
+                            if has_body {
+                                // "⋯" shows the rest of the message; remembered
+                                // from the Commits tab, which uses the same switch.
+                                let (r, resp) = ui.allocate_exact_size(vec2(24.0, 16.0), Sense::click());
+                                let (bg, fg) = if body_open { (p.accent_subtle, p.accent) } else if resp.hovered() { (p.border, p.fg_muted) } else { (p.border_muted, p.fg_muted) };
+                                ui.painter().rect_filled(r, 4.0, bg);
+                                icons::paint(ui.painter(), r.shrink2(vec2(5.0, 2.0)), Icon::Kebab, fg);
+                                if resp.tip(if body_open { "Hide the full message" } else { "Show the full message" }).clicked() {
+                                    ui.ctx().data_mut(|d| d.insert_temp(body_id, !body_open));
+                                }
+                            }
+                        });
+                        if has_body && body_open {
+                            ui.label(RichText::new(body).font(theme::mono(12.0)).color(p.fg_muted));
+                        }
+                    });
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                    if ui.add(button("Browse files", p)).tip("Browse the repository at this point, on GitHub").clicked() {
+                        app.actions.push(Action::OpenUrl(format!("https://github.com/{}/tree/{}", page.repo, c.sha)));
+                    }
+                });
+            });
+        });
+        row_separator(ui);
+        egui::Frame::new().inner_margin(Margin::symmetric(16, 10)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.spacing_mut().interact_size.y = 20.0;
+                let person = |ui: &mut Ui, who: Option<&crate::github::Actor>, git: Option<&crate::github::GitSignature>| {
+                    let login = who.map(|a| a.login.as_str()).unwrap_or("");
+                    let name = who.map(|a| a.login.clone()).or_else(|| git.and_then(|g| g.name.clone())).unwrap_or_else(|| "Someone".into());
+                    super::avatar_of(ui, login, who.map(|a| a.avatar_url.as_str()).unwrap_or(""), 20.0);
+                    ui.label(RichText::new(name).font(theme::bold(14.0)).color(p.fg));
+                };
+                let author = c.commit.author.as_ref();
+                let committer = c.commit.committer.as_ref();
+                let when = committer.and_then(|g| g.date.as_deref()).or(author.and_then(|g| g.date.as_deref())).unwrap_or("");
+                person(ui, c.author.as_ref(), author);
+                // "X authored and Y committed" when they differ, like GitHub.
+                let same = match (c.author.as_ref(), c.committer.as_ref()) {
+                    (Some(a), Some(b)) => a.login == b.login,
+                    (None, None) => author.and_then(|g| g.name.as_ref()) == committer.and_then(|g| g.name.as_ref()),
+                    _ => false,
+                };
+                if !same && c.committer.as_ref().is_some_and(|b| b.login != "web-flow") {
+                    ui.label(RichText::new("authored and").color(p.fg_muted));
+                    person(ui, c.committer.as_ref(), committer);
+                }
+                ui.label(RichText::new(format!("committed {}", util::ago(when))).color(p.fg_muted));
+                if c.commit.verification.as_ref().is_some_and(|v| v.verified) {
+                    ui.add_space(4.0);
+                    pill(ui, "Verified", theme::bold(12.0), Color32::TRANSPARENT, p.open, p.open.gamma_multiply(0.6))
+                        .tip("This commit was signed with a verified signature.");
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    // Right to left: copy, the SHA, then its parents.
+                    if icon_button(ui, Icon::Copy, "Copy full SHA", p).clicked() {
+                        app.actions.push(Action::Copy(c.sha.clone()));
+                    }
+                    let full = ui.available_width() > 560.0;
+                    let sha = if full { c.sha.as_str() } else { c.short_sha() };
+                    ui.label(RichText::new(sha).font(theme::mono(12.0)).color(p.fg_muted)).tip(&c.sha);
+                    ui.label(RichText::new("commit").size(12.0).color(p.fg_muted));
+                    if !c.parents.is_empty() {
+                        ui.add_space(8.0);
+                        for parent in c.parents.iter().rev() {
+                            let short = &parent.sha[..parent.sha.len().min(7)];
+                            if link_styled(ui, short, theme::mono(12.0), p.accent).tip(&parent.sha).clicked() {
+                                app.actions.push(Action::OpenCommit(page.repo.clone(), parent.sha.clone()));
+                            }
+                        }
+                        let n = c.parents.len();
+                        ui.label(RichText::new(format!("{n} parent{}", if n == 1 { "" } else { "s" })).size(12.0).color(p.fg_muted));
+                    }
+                });
+            });
+        });
+    });
 }

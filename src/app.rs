@@ -2,7 +2,7 @@
 //! send a `Msg` back over a channel; the UI never waits on the network.
 
 use crate::auth::{self, Source};
-use crate::github::{self, Client, FileDiff, ListResult, PrDetail, PrSummary, SECTIONS};
+use crate::github::{self, Client, CommitDetail, FileDiff, ListResult, PrDetail, PrSummary, SECTIONS};
 use crate::{cache, diff, theme, util, views};
 use egui::{Key, KeyboardShortcut, Modifiers};
 use std::collections::{HashMap, HashSet};
@@ -28,6 +28,8 @@ pub enum Msg {
     ListMore { key: String, result: github::Result<ListResult> },
     Detail { id: String, result: github::Result<PrDetail>, stale: bool },
     Files { id: String, result: github::Result<Vec<FileDiff>>, stale: bool },
+    /// One commit with its diff, keyed by `CommitPage::key`.
+    Commit { key: String, result: github::Result<CommitDetail> },
     Posted { id: String, result: github::Result<()>, what: &'static str },
     /// A PR looked up from the ⌘K box. `seq` drops replies to old requests.
     Found { seq: u64, result: github::Result<PrSummary> },
@@ -92,6 +94,21 @@ pub enum Panel {
     Tree,
 }
 
+/// A commit opened from the PR, shown in place of the PR's tabs.
+#[derive(Clone, PartialEq, Debug)]
+pub struct CommitPage {
+    pub repo: String,
+    pub oid: String,
+    /// The tab to return to.
+    pub from: Tab,
+}
+
+impl CommitPage {
+    pub fn key(&self) -> String {
+        format!("commit-{}-{}", self.repo, self.oid)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Tab {
     Conversation,
@@ -145,6 +162,10 @@ pub enum Action {
     SetClosed(bool),
     Select(PrSummary),
     Tab(Tab),
+    /// Show a commit's page: (repo, sha).
+    OpenCommit(String, String),
+    /// Back from a commit's page to the PR.
+    CloseCommit,
     Refresh,
     OpenUrl(String),
     Copy(String),
@@ -224,6 +245,10 @@ pub struct App {
     pending_sections: bool,
     pub files: HashMap<String, Loaded<Vec<FileDiff>>>,
     pub tab: Tab,
+    /// The commit page on screen, if any.
+    pub commit: Option<CommitPage>,
+    /// Commits opened so far, by `CommitPage::key`.
+    pub commits: HashMap<String, Loaded<CommitDetail>>,
     pub diff_layouts: HashMap<String, Arc<diff::Layout>>,
     /// Files you opened or closed by hand, keyed by (PR id, path). Other
     /// files start closed if they're marked viewed, like on GitHub.
@@ -295,7 +320,8 @@ pub struct App {
 /// window after data loads, then quits. Optional: `GITHUB_PRS_TAB`
 /// (conversation/commits/checks/files), `GITHUB_PRS_THEME` (light/dark),
 /// `GITHUB_PRS_ROW` (which PR to select), `GITHUB_PRS_COLLAPSE`
-/// (e.g. `list,details,tree`).
+/// (e.g. `list,details,tree`), `GITHUB_PRS_COMMIT` (first/last/a SHA: open
+/// that commit's page).
 struct Screenshot {
     path: String,
     requested: bool,
@@ -333,6 +359,8 @@ impl App {
             pending_sections: false,
             files: HashMap::new(),
             tab: Tab::Conversation,
+            commit: None,
+            commits: HashMap::new(),
             diff_layouts: HashMap::new(),
             collapsed: HashMap::new(),
             viewed_pending: HashMap::new(),
@@ -629,6 +657,7 @@ impl App {
                 Msg::ListMerge { .. } => ("list merge", false),
                 Msg::Detail { stale, .. } => ("detail", *stale),
                 Msg::Files { stale, .. } => ("files", *stale),
+                Msg::Commit { .. } => ("commit", false),
                 Msg::Posted { .. } => ("posted", false),
                 Msg::Viewed { .. } => ("viewed", false),
                 Msg::Found { .. } => ("found", false),
@@ -817,6 +846,17 @@ impl App {
                     self.patch_viewed(&id, &path, v);
                 }
             }
+            Msg::Commit { key, mut result } => {
+                if let Err(e) = &result {
+                    self.on_error(e);
+                }
+                if let Ok(c) = &mut result {
+                    crate::diff::sort_like_tree(Arc::make_mut(&mut c.files).as_mut_slice());
+                    cache::store(&key, c);
+                }
+                self.diff_layouts.remove(&key);
+                self.commits.entry(key).or_default().apply(result, false);
+            }
             Msg::FileText { pr_id, path, result } => match result {
                 Ok(text) => {
                     let lines: Vec<String> = text.lines().map(str::to_string).collect();
@@ -940,6 +980,39 @@ impl App {
         pr.map(|p| p.repository.name_with_owner.clone())
     }
 
+    /// What the diff on screen belongs to: its state key, repo, and the
+    /// commit its files are read from. A commit page when one is open,
+    /// otherwise the selected PR.
+    fn diff_target(&self) -> Option<(String, String, String)> {
+        if let Some(c) = &self.commit {
+            return Some((c.key(), c.repo.clone(), c.oid.clone()));
+        }
+        let pr = self.selected.as_ref()?;
+        let head = self.details.get(&pr.id).and_then(|d| d.data.as_ref()).map(|d| d.head_ref_oid.clone()).unwrap_or_default();
+        Some((pr.id.clone(), pr.repository.name_with_owner.clone(), head))
+    }
+
+    fn open_commit(&mut self, repo: String, oid: String) {
+        let from = self.commit.as_ref().map(|c| c.from).unwrap_or(self.tab);
+        let page = CommitPage { repo, oid, from };
+        let key = page.key();
+        self.commit = Some(page.clone());
+        let entry = self.commits.entry(key.clone()).or_default();
+        if entry.data.is_some() || entry.loading {
+            return;
+        }
+        // Commits never change, so a cached copy is as good as a fresh one.
+        if let Some(cached) = cache::load::<CommitDetail>(&key) {
+            entry.apply(Ok(cached), false);
+            return;
+        }
+        entry.loading = true;
+        self.spawn(move |c, tx| {
+            let result = c.commit(&page.repo, &page.oid);
+            let _ = tx.send(Msg::Commit { key, result });
+        });
+    }
+
     pub fn expansion(&self, pr_id: &str, path: &str) -> diff::Expansion {
         let key = (pr_id.to_string(), path.to_string());
         (self.file_texts.get(&key).cloned().flatten(), self.expanded.get(&key).cloned().unwrap_or_default())
@@ -1058,10 +1131,20 @@ impl App {
                 self.load_detail(&pr, false);
                 if self.selected.as_ref().map(|p| &p.id) != Some(&pr.id) {
                     self.composer.clear();
+                    self.commit = None;
                 }
                 self.selected = Some(pr);
             }
-            Action::Tab(t) => self.tab = t,
+            Action::Tab(t) => {
+                self.tab = t;
+                self.commit = None;
+            }
+            Action::OpenCommit(repo, oid) => self.open_commit(repo, oid),
+            Action::CloseCommit => {
+                if let Some(c) = self.commit.take() {
+                    self.tab = c.from;
+                }
+            }
             Action::Refresh => self.refresh_all(),
             Action::OpenUrl(u) => util::open_url(&u),
             Action::Copy(s) => {
@@ -1095,10 +1178,10 @@ impl App {
             }
             Action::DisableAutoMerge => self.merge_action("Auto-merge disabled", |c, d| c.disable_auto_merge(&d.id)),
             Action::ToggleFile(name) => {
-                if let Some(pr) = &self.selected {
-                    let now = self.is_collapsed(&pr.id, &name);
-                    self.collapsed.insert((pr.id.clone(), name), !now);
-                    self.diff_layouts.remove(&pr.id);
+                if let Some((key, _, _)) = self.diff_target() {
+                    let now = self.is_collapsed(&key, &name);
+                    self.collapsed.insert((key.clone(), name), !now);
+                    self.diff_layouts.remove(&key);
                 }
             }
             Action::QuoteReply(body) => {
@@ -1191,20 +1274,18 @@ impl App {
                 });
             }
             Action::ExpandHunk(path, idx, amount) => {
-                let Some(pr) = self.selected.clone() else { return };
-                let key = (pr.id.clone(), path.clone());
+                let Some((id, repo, head)) = self.diff_target() else { return };
+                let key = (id.clone(), path.clone());
                 *self.expanded.entry(key.clone()).or_default().entry(idx).or_default() += amount;
-                self.diff_layouts.remove(&pr.id);
+                self.diff_layouts.remove(&id);
                 if !self.file_texts.contains_key(&key) {
-                    let head = self.details.get(&pr.id).and_then(|d| d.data.as_ref()).map(|d| d.head_ref_oid.clone()).unwrap_or_default();
                     if head.is_empty() {
                         return;
                     }
                     self.file_texts.insert(key, None);
-                    let repo = pr.repository.name_with_owner.clone();
                     self.spawn(move |c, tx| {
                         let result = c.file_text(&repo, &path, &head);
-                        let _ = tx.send(Msg::FileText { pr_id: pr.id, path, result });
+                        let _ = tx.send(Msg::FileText { pr_id: id, path, result });
                     });
                 }
             }
@@ -1293,7 +1374,7 @@ impl App {
             }
             // ⌘B: PR list. ⇧⌘B: the side panel of the current tab.
             if i.consume_shortcut(&cmd_shift(Key::B)) {
-                acts.push(Action::TogglePanel(if self.tab == Tab::Files { Panel::Tree } else { Panel::Details }));
+                acts.push(Action::TogglePanel(if self.tab == Tab::Files || self.commit.is_some() { Panel::Tree } else { Panel::Details }));
             }
             if i.consume_shortcut(&cmd(Key::B)) {
                 acts.push(Action::TogglePanel(Panel::List));
@@ -1324,15 +1405,21 @@ impl App {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         if !typing {
-            let (down, up, slash, copy) = ctx.input(|i| {
+            let (down, up, slash, copy, escape) = ctx.input(|i| {
                 let plain = i.modifiers.is_none();
                 (
                     i.key_pressed(Key::ArrowDown) || i.key_pressed(Key::J),
                     i.key_pressed(Key::ArrowUp) || i.key_pressed(Key::K),
                     i.key_pressed(Key::Slash),
                     plain && i.key_pressed(Key::C),
+                    plain && i.key_pressed(Key::Escape),
                 )
             });
+            // Esc leaves a commit page, unless it's closing the floating
+            // file tree or the ⌘K box first.
+            if escape && self.commit.is_some() && self.goto.is_none() && !(self.tree_narrow && self.tree_open_narrow) {
+                self.actions.push(Action::CloseCommit);
+            }
             if copy {
                 if let Some(pr) = &self.selected {
                     self.actions.push(Action::Copy(pr.url.clone()));
@@ -1411,6 +1498,18 @@ impl App {
             let state = std::env::var("GITHUB_PRS_STATE").unwrap_or_default();
             let d = self.selected.as_ref().and_then(|s| self.details.get(&s.id)).and_then(|d| d.data.clone());
             if let Some(d) = d {
+                // GITHUB_PRS_COMMIT=first|last|<sha> opens that commit's page.
+                if let Ok(which) = std::env::var("GITHUB_PRS_COMMIT") {
+                    let nodes = &d.commits.nodes;
+                    let oid = match which.as_str() {
+                        "first" => nodes.first().map(|n| n.commit.oid.clone()),
+                        "last" => nodes.last().map(|n| n.commit.oid.clone()),
+                        sha => Some(sha.to_string()),
+                    };
+                    if let Some(oid) = oid {
+                        self.actions.push(Action::OpenCommit(d.repository.name_with_owner.clone(), oid));
+                    }
+                }
                 if state.contains("reply") {
                     if let Some(t) = d.review_threads.nodes.iter().find(|t| t.viewer_can_reply) {
                         self.thread_replies.insert(t.id.clone(), "Good catch, fixed in the next commit.".into());
@@ -1432,6 +1531,8 @@ impl App {
                 }
             }
         }
+        let commit_ready = self.commit.as_ref().is_none_or(|c| self.commits.get(&c.key()).is_some_and(|l| l.data.is_some()));
+        let loaded = loaded && commit_ready && (shot.staged || std::env::var("GITHUB_PRS_COMMIT").is_err());
         let settle = self.started.elapsed() > Duration::from_secs(4);
         let timeout = self.started.elapsed() > Duration::from_secs(45);
         if !shot.requested && ((loaded && settle) || timeout) {

@@ -20,7 +20,7 @@ pub fn main(app: &mut App, ui: &mut Ui) {
     let width = ui.available_width();
     // On Files, the diff keeps at least 900px (below that the tree hides),
     // so the list folds sooner there and never grows past what's left.
-    let files = app.tab != crate::app::Tab::Conversation && app.selected.is_some();
+    let files = (app.tab != crate::app::Tab::Conversation || app.commit.is_some()) && app.selected.is_some();
     let room = width - 900.0 - 40.0;
     app.narrow = width < NARROW || (files && room < 300.0);
     let mut open = if app.narrow { app.list_open_narrow } else { app.panels.list };

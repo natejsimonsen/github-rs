@@ -378,6 +378,9 @@ fn hunk_start(line: &str) -> (u32, u32) {
 pub struct Source<'a> {
     pub repo: &'a str,
     pub head: &'a str,
+    /// A single commit's diff: no "Viewed" boxes, since those belong to
+    /// the PR's review.
+    pub commit: bool,
 }
 
 pub fn show(app: &mut App, ui: &mut Ui, pr_id: &str, files: Arc<Vec<FileDiff>>, src: Source<'_>) {
@@ -722,6 +725,9 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
         ui.painter().galley(r.min, g, p.fg_muted);
         resp.tip(&summary);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if src.commit {
+                return;
+            }
             ui.add_space(14.0);
             // GitHub's progress bar for files viewed.
             let (bar, _) = ui.allocate_exact_size(vec2(60.0, 8.0), Sense::hover());
@@ -734,7 +740,8 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
     ui.add_space(8.0);
 
     let char_w = ui.fonts_mut(|f| f.glyph_width(&theme::mono(12.0), 'M'));
-    let mut area = egui::ScrollArea::vertical().id_salt("diff").auto_shrink([false, false]);
+    // Salted per PR or commit, so pages don't inherit each other's scroll.
+    let mut area = egui::ScrollArea::vertical().id_salt(("diff", current_id)).auto_shrink([false, false]);
     if let Some(y) = ui.ctx().data_mut(|d| d.remove_temp::<f32>(jump_id)) {
         area = area.vertical_scroll_offset(y);
     }
@@ -918,11 +925,14 @@ fn file_header(app: &mut App, ui: &mut Ui, p: &Palette, f: &FileDiff, fi: usize,
     let painter = ui.painter();
     let resp = ui.interact(r, egui::Id::new(("file-header", fi)), Sense::click());
     let right = r.right() - 12.0;
+    let viewed_w = if src.commit { 0.0 } else { 82.0 + 8.0 };
     let viewed_rect = Rect::from_min_max(pos2(right - 82.0, r.center().y - 14.0), pos2(right, r.center().y + 14.0));
-    let menu_rect = Rect::from_min_size(pos2(viewed_rect.left() - 8.0 - 28.0, r.center().y - 14.0), vec2(28.0, 28.0));
+    let menu_rect = Rect::from_min_size(pos2(right - viewed_w - 28.0, r.center().y - 14.0), vec2(28.0, 28.0));
     // Registered after the header, so these win clicks on top of it.
-    let viewed_resp = ui.interact(viewed_rect, egui::Id::new(("file-viewed", fi)), Sense::click());
-    viewed_resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, f.viewed, "Viewed"));
+    let viewed_resp = ui.interact(if src.commit { Rect::NOTHING } else { viewed_rect }, egui::Id::new(("file-viewed", fi)), Sense::click());
+    if !src.commit {
+        viewed_resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, f.viewed, "Viewed"));
+    }
     let menu_resp = ui.interact(menu_rect, egui::Id::new(("file-menu", fi)), Sense::click());
     let radius = if collapsed { CornerRadius::same(6) } else { CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 } };
     painter.rect_filled(r, radius, p.canvas_subtle);
@@ -965,7 +975,9 @@ fn file_header(app: &mut App, ui: &mut Ui, p: &Palette, f: &FileDiff, fi: usize,
         painter.rect_filled(menu_rect, 6.0, p.border.gamma_multiply(0.4));
     }
     icons::paint(painter, menu_rect.shrink(6.0), Icon::Kebab, p.fg_muted);
-    viewed_box(painter, p, viewed_rect, f.viewed, viewed_resp.hovered());
+    if !src.commit {
+        viewed_box(painter, p, viewed_rect, f.viewed, viewed_resp.hovered());
+    }
     if resp.hovered() || viewed_resp.hovered() || copy_resp.hovered() || menu_resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }

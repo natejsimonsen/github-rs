@@ -2,6 +2,7 @@
 //! REST for per-file diffs and for posting comments and reviews.
 
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use serde_json::{Value, json};
 use std::time::Duration;
 
@@ -83,7 +84,7 @@ pub fn http_agent() -> ureq::Agent {
 #[serde(rename_all = "camelCase")]
 pub struct Actor {
     pub login: String,
-    #[serde(default)]
+    #[serde(default, alias = "avatar_url")]
     pub avatar_url: String,
 }
 
@@ -455,6 +456,63 @@ pub struct FileDiff {
     pub viewed: bool,
 }
 
+/// One commit with its changed files, from the REST API.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CommitDetail {
+    pub sha: String,
+    pub html_url: String,
+    pub commit: CommitMeta,
+    /// The GitHub account behind the commit, if GitHub could tell.
+    pub author: Option<Actor>,
+    pub committer: Option<Actor>,
+    #[serde(default)]
+    pub parents: Vec<Parent>,
+    #[serde(default)]
+    pub files: Arc<Vec<FileDiff>>,
+}
+
+impl CommitDetail {
+    pub fn headline(&self) -> &str {
+        self.commit.message.lines().next().unwrap_or("").trim()
+    }
+
+    /// The message after its first line.
+    pub fn body(&self) -> &str {
+        self.commit.message.split_once('\n').map(|(_, b)| b.trim()).unwrap_or("")
+    }
+
+    pub fn short_sha(&self) -> &str {
+        &self.sha[..self.sha.len().min(7)]
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct CommitMeta {
+    #[serde(default)]
+    pub message: String,
+    pub author: Option<GitSignature>,
+    pub committer: Option<GitSignature>,
+    pub verification: Option<Verification>,
+}
+
+/// Who wrote or committed, as recorded in git itself.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct GitSignature {
+    pub name: Option<String>,
+    pub date: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Verification {
+    #[serde(default)]
+    pub verified: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Parent {
+    pub sha: String,
+}
+
 /// A sidebar section: a name, an icon, and the search that fills it.
 pub struct Section {
     pub title: &'static str,
@@ -802,6 +860,25 @@ query($id: ID!) { node(id: $id) { ... on PullRequest {
             }
         }
         Ok(files)
+    }
+
+    /// One commit and every file it changed. GitHub sends 300 files per
+    /// page, so big commits take a few requests.
+    pub fn commit(&self, repo: &str, sha: &str) -> Result<CommitDetail> {
+        let mut out: Option<CommitDetail> = None;
+        for page in 1..=10 {
+            let body = self.rest_get(&format!("/repos/{repo}/commits/{sha}?per_page=300&page={page}"))?;
+            let c: CommitDetail = serde_json::from_str(&body).map_err(|e| Error::Other(format!("Unexpected response: {e}")))?;
+            let done = c.files.len() < 300;
+            match &mut out {
+                None => out = Some(c),
+                Some(first) => Arc::make_mut(&mut first.files).extend(c.files.iter().cloned()),
+            }
+            if done {
+                break;
+            }
+        }
+        Ok(out.expect("one page at least"))
     }
 
     fn viewed_files(&self, repo: &str, number: u64) -> Result<std::collections::HashSet<String>> {

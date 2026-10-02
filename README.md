@@ -10,8 +10,10 @@ Press **⌘K** to jump to any PR: type a number (`119316`), `owner/repo#123`,
 or paste a link. A pasted link opens right away.
 
 The timeline shows what happened, like on GitHub: commits pushed, labels,
-force-pushes, review requests, merges, and closes. Files changed has a folder
-tree with a filter box, and each wide file scrolls sideways on its own.
+force-pushes, review requests, merges, and closes. Clicking a commit opens
+its own page in the app, with its message, parents, and diff; Esc goes back.
+Files changed has a folder tree with a filter box, and each wide file scrolls
+sideways on its own.
 Checks lists failures first, marks required checks, and folds skipped ones.
 
 In the conversation you can reply to code review threads, **Resolve** or
@@ -164,7 +166,8 @@ On Windows and Linux, use `Ctrl` instead of `⌘`. Double-click a PR to open it 
   loads, then quits. Combine with `GITHUB_PRS_TAB=files|commits|checks`,
   `GITHUB_PRS_THEME=dark|light`, `GITHUB_PRS_ROW=<n>`, and
   `GITHUB_PRS_COLLAPSE=list,details,tree`, `GITHUB_PRS_SCROLL=<px>|bottom`,
-  `GITHUB_PRS_GOTO=<link>`, and `GITHUB_PRS_STATE=reply,quote,preview`.
+  `GITHUB_PRS_GOTO=<link>`, `GITHUB_PRS_COMMIT=first|last|<sha>` (open that
+  commit's page), and `GITHUB_PRS_STATE=reply,quote,preview`.
   These runs don't save settings.
 - Offscreen screenshots (work even with the screen locked, and block every
   write to GitHub): build with `cargo build --release --features snapshot`,
