@@ -124,7 +124,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let scroll_to = ui.ctx().data_mut(|d| d.remove_temp::<usize>(egui::Id::new("scroll-to-row")));
         // Whatever changed the selection (keys, ⌘K, a script), show that row.
         let shown_id = egui::Id::new("list-shown-selection");
-        let shown: Option<String> = ui.ctx().data(|d| d.get_temp(shown_id));
+        // Stored as Option<String>: reading it as String would always miss and
+        // re-center the selection every frame, fighting the scroll wheel.
+        let shown = ui.ctx().data(|d| d.get_temp::<Option<String>>(shown_id)).flatten();
         let sel_id = app.selected.as_ref().map(|s| s.id.clone());
         let reset = ui.ctx().data_mut(|d| d.remove_temp::<bool>(egui::Id::new("list-reset-scroll"))).unwrap_or(false);
         let mut area = egui::ScrollArea::vertical().id_salt("pr-list").auto_shrink([false, false]);

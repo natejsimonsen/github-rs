@@ -194,6 +194,8 @@ pub fn apply(ctx: &egui::Context) {
         s.spacing.item_spacing = egui::vec2(8.0, 6.0);
         s.spacing.button_padding = egui::vec2(12.0, 5.0);
         s.spacing.interact_size.y = 28.0;
+        // egui's edge fade blurs the last row of a list; scroll bars are enough.
+        s.spacing.scroll.fade.strength = 0.0;
         s.text_styles.insert(egui::TextStyle::Body, body(14.0));
         s.text_styles.insert(egui::TextStyle::Button, body(14.0));
         s.text_styles.insert(egui::TextStyle::Small, body(12.0));

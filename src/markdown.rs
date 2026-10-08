@@ -1342,6 +1342,7 @@ pub fn solid_bar(ui: &mut Ui) {
     let mut scroll = egui::style::ScrollStyle::solid();
     scroll.bar_width = 6.0;
     scroll.bar_inner_margin = 4.0;
+    scroll.fade.strength = 0.0;
     ui.spacing_mut().scroll = scroll;
     // The handle needs to stand out from its track in light mode too.
     let handle = if ui.visuals().dark_mode { egui::Color32::from_rgb(0x3d, 0x44, 0x4d) } else { egui::Color32::from_rgb(0xd1, 0xd9, 0xe0) };
