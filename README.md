@@ -126,18 +126,17 @@ again after you change the code. To install somewhere else, pass a folder:
 a release build on macOS, Linux and Windows, and `nix build` on macOS and
 Linux.
 
-**Releasing**: bump `version` in `Cargo.toml`, commit, then
-
-```sh
-git tag v0.2.0 && git push --tags
-```
-
-The Release workflow builds a universal macOS app and a Linux binary and
-publishes them on the Releases page. The Homebrew tap
+**Releasing** is automatic. Write commit messages as
+[Conventional Commits](https://www.conventionalcommits.org): `fix: ...` makes a
+patch release, `feat: ...` a minor one, and `feat!: ...` (or a
+`BREAKING CHANGE:` footer) a major one. Other types (`docs:`, `chore:`, ...)
+don't release. Once CI passes on `main`, the Release workflow bumps
+`Cargo.toml`, commits and tags `vX.Y.Z`, builds a universal macOS app and a
+Linux binary, and publishes them on the Releases page. The Homebrew tap
 ([natejsimonsen/homebrew-tap](https://github.com/natejsimonsen/homebrew-tap))
 checks for new releases every few hours and updates its cask; run its
-"Update cask" workflow to do it right away. Flox and Nix always build from
-the latest commit on `main`.
+"Update cask" workflow to do it right away. Flox and Nix build from the
+latest commit on `main`; `flox upgrade` picks up a new release.
 
 ## Signing in
 

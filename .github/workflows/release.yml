@@ -1,24 +1,69 @@
-# Tag a version (git tag v0.2.0 && git push --tags) and this builds the
-# downloads and publishes a GitHub release. The Homebrew tap picks the new
-# version up from that release.
+# After CI passes on main, semantic-release reads the commit messages since
+# the last tag (fix: -> patch, feat: -> minor, a ! or BREAKING CHANGE ->
+# major). If there's something to release it bumps Cargo.toml, commits that
+# to main, tags vX.Y.Z and opens a draft GitHub release. The jobs below then
+# build the downloads and publish it. The Homebrew tap picks the new version
+# up from that release; Flox and Nix get it from the bump commit on main.
 name: Release
 
 on:
-  push:
-    tags: ["v*"]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  macos:
-    name: macOS app (universal)
-    runs-on: macos-latest
+  version:
+    name: Tag a version
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The commit CI passed on. If main moved since, semantic-release skips.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: >
+          npx --yes
+          -p semantic-release@25
+          -p @semantic-release/exec@7
+          -p @semantic-release/git@10
+          semantic-release
+
+  macos:
+    name: macOS app (universal)
+    needs: version
+    if: needs.version.outputs.version != ''
+    runs-on: macos-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ env.VERSION }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin, x86_64-apple-darwin
@@ -35,9 +80,8 @@ jobs:
         run: BIN=target/universal/github-prs scripts/bundle-macos.sh --no-install
       - name: Zip it
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          ditto -c -k --keepParent "target/release/GitHub PRs.app" "GitHub-PRs-$version-macos.zip"
-          shasum -a 256 "GitHub-PRs-$version-macos.zip" | tee "GitHub-PRs-$version-macos.zip.sha256"
+          ditto -c -k --keepParent "target/release/GitHub PRs.app" "GitHub-PRs-$VERSION-macos.zip"
+          shasum -a 256 "GitHub-PRs-$VERSION-macos.zip" | tee "GitHub-PRs-$VERSION-macos.zip.sha256"
       - uses: actions/upload-artifact@v4
         with:
           name: macos
@@ -45,16 +89,21 @@ jobs:
 
   linux:
     name: Linux binary (x86_64)
+    needs: version
+    if: needs.version.outputs.version != ''
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v${{ env.VERSION }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
       - name: Tar it
         run: |
-          version="${GITHUB_REF_NAME#v}"
-          name="github-prs-$version-linux-x86_64"
+          name="github-prs-$VERSION-linux-x86_64"
           mkdir "$name"
           cp target/release/github-prs README.md LICENSE "$name/"
           tar czf "$name.tar.gz" "$name"
@@ -66,15 +115,17 @@ jobs:
 
   publish:
     name: Publish the release
-    needs: [macos, linux]
+    needs: [version, macos, linux]
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: v${{ needs.version.outputs.version }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            GitHub-PRs-*
-            github-prs-*
-          generate_release_notes: true
+      # The release stays a draft until its downloads are attached, so the
+      # Homebrew tap never sees a release without them.
+      - run: |
+          gh release upload "$TAG" GitHub-PRs-* github-prs-* --clobber -R "$GITHUB_REPOSITORY"
+          gh release edit "$TAG" --draft=false --latest -R "$GITHUB_REPOSITORY"
