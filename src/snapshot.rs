@@ -18,6 +18,7 @@
 //! - `shot:path.png` saves a picture mid-script
 //!
 //! Nothing is ever sent to GitHub that would change it: writes are blocked.
+//! `GITHUB_PRS_WRITE=1` lifts that, for end-to-end tests on a throwaway PR.
 
 use crate::app::App;
 use egui::{Key, Modifiers, PointerButton, Pos2};
@@ -26,7 +27,9 @@ use egui_kittest::kittest::Queryable;
 use std::time::{Duration, Instant};
 
 pub fn run(path: &str) {
-    crate::github::READ_ONLY.store(true, std::sync::atomic::Ordering::Relaxed);
+    if std::env::var("GITHUB_PRS_WRITE").as_deref() != Ok("1") {
+        crate::github::READ_ONLY.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     // GITHUB_PRS_CACHED=1: only what's cached on disk, no API calls at all.
     if std::env::var("GITHUB_PRS_CACHED").is_ok() {
         crate::github::OFFLINE.store(true, std::sync::atomic::Ordering::Relaxed);

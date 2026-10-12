@@ -390,7 +390,7 @@ fn merge_bar(app: &mut App, ui: &mut Ui, p: &Palette, ms: &super::MergeStatus, d
                 Some(d) if d.checks.is_empty() => 200.0,
                 Some(_) => 250.0,
                 None => 0.0,
-            };
+            } + if d.is_some_and(|d| can_approve(app, d)) { 110.0 } else { 0.0 };
             let measure = |t: &str, f: egui::FontId| ui.painter().layout_no_wrap(t.to_string(), f, p.fg).size().x;
             let title_w = measure(&ms.title, theme::bold(14.0));
             let avail = ui.available_width();
@@ -447,6 +447,32 @@ fn merge_bar(app: &mut App, ui: &mut Ui, p: &Palette, ms: &super::MergeStatus, d
 fn merge_controls(app: &mut App, ui: &mut Ui, p: &Palette, _ms: &super::MergeStatus, d: &PrDetail) {
     // Laid out right to left here, so the main button ends up on the right.
     merge_actions(app, ui, p, d);
+    approve_button(app, ui, p, d);
+}
+
+/// Can you approve this PR? Not your own, not a draft, and still open.
+fn can_approve(app: &App, d: &PrDetail) -> bool {
+    !app.viewer.is_empty() && d.author.as_ref().is_none_or(|a| a.login != app.viewer) && d.state == "OPEN" && !d.is_draft
+}
+
+/// Whether your latest verdict on this PR is an approval.
+fn approved_by_you(app: &App, d: &PrDetail) -> bool {
+    d.latest_opinionated_reviews.nodes.iter().any(|r| r.state == "APPROVED" && r.author.as_ref().is_some_and(|a| a.login == app.viewer))
+}
+
+/// "Approve" beside the merge button, or "Approved" once you have.
+fn approve_button(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
+    if app.posting || !can_approve(app, d) {
+        return;
+    }
+    if approved_by_you(app, d) {
+        ui.add_enabled(false, button("✓ Approved", p)).on_disabled_hover_text("You approved these changes");
+        return;
+    }
+    let tip = if app.composer.trim().is_empty() { "Submit an approving review" } else { "Submit an approving review with your comment" };
+    if ui.add(button("Approve", p)).tip(tip).clicked() {
+        app.actions.push(Action::Review("APPROVE"));
+    }
 }
 
 /// The merge actions, the same at the top and in the merge box: GitHub's
@@ -1943,7 +1969,8 @@ fn composer(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         // The hint gives way to the buttons.
-                        let buttons_w = 120.0 + if d.state == "OPEN" { 175.0 } else { 0.0 } + if !own && d.state == "OPEN" { 160.0 } else { 0.0 };
+                        let buttons_w =
+                            120.0 + if d.state == "OPEN" { 175.0 } else { 0.0 } + if !own && d.state == "OPEN" && !d.is_draft { 160.0 } else { 0.0 };
                         let hint_w = (ui.available_width() - buttons_w).max(0.0);
                         // Whole hint or none: a cut-off hint is just noise.
                         let hint = ["Markdown is supported · ⌘Enter to comment", "Markdown is supported"]
@@ -1962,7 +1989,7 @@ fn composer(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                                     app.actions.push(Action::Comment);
                                 }
                                 let btn_h = comment.rect.height();
-                                if !own && d.state == "OPEN" {
+                                if !own && d.state == "OPEN" && !d.is_draft {
                                     let resp = ui.add(button("Review changes  ▾", p));
                                     egui::Popup::menu(&resp).show(|ui| {
                                         ui.set_width(260.0);
