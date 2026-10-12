@@ -30,7 +30,9 @@ built in, picked by file name or the code block's language tag.
 Each PR shows its merge status at a glance: ready, blocked (and why),
 conflicts, out of date, or auto-merge on. It appears in the list rows and in a
 colored bar under the PR title. The bar also has a **Merge** button (with a
-merge-method menu and a confirm step) and **Enable / Disable auto-merge**.
+merge-method menu and a confirm step), **Enable / Disable auto-merge**, and
+**Approve** on PRs you didn't write. Text in the comment box goes with the
+approval. Once you've approved, the button reads "✓ Approved".
 
 The app checks merge requirements itself rather than trusting GitHub's summary
 alone: an approval from someone else, required checks passing, all
