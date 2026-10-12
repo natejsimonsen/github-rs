@@ -14,6 +14,7 @@
 //! - `hover:x,y` moves the mouse there
 //! - `key:cmd+k`, `key:escape`, `key:j` presses keys
 //! - `type:some text` types into the focused field
+//! - `scroll:-400` turns the mouse wheel there (negative scrolls down)
 //! - `wait:500` waits that many milliseconds
 //! - `shot:path.png` saves a picture mid-script
 //!
@@ -77,6 +78,12 @@ pub fn run(path: &str) {
                 harness.key_press_modifiers(mods, key);
             }
             "type" => harness.event(egui::Event::Text(arg.to_string())),
+            "scroll" => harness.event(egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, arg.parse().unwrap_or(0.0)),
+                modifiers: Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            }),
             "wait" => {
                 let until = Instant::now() + Duration::from_millis(arg.parse().unwrap_or(500));
                 while Instant::now() < until {

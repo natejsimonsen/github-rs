@@ -58,10 +58,15 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         commit_page(app, ui, p, &page, detail.as_deref());
         return;
     }
-    ui.scope(|ui| {
-        ui.set_max_width(full - 14.0);
-        header(app, ui, p, &sel, detail.as_deref(), files.as_deref().map(|f| f.len()));
-    });
+    let header_h = ui
+        .scope(|ui| {
+            ui.set_max_width(full - 14.0);
+            header(app, ui, p, &sel, detail.as_deref(), files.as_deref().map(|f| f.len()));
+        })
+        .response
+        .rect
+        .height();
+    app.header_h[app.detail_scrolled as usize] = header_h;
     ui.add_space(8.0);
 
     if let Some(e) = &error {
@@ -127,7 +132,15 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             // that's left, and clip to it.
             let width = ui.available_width();
             let frame_rect = ui.available_rect_before_wrap();
-            let mut area = egui::ScrollArea::vertical().id_salt(("detail", &sel.id, tab as u8)).auto_shrink([false, false]).max_width(width);
+            let salt = ("detail", &sel.id, tab as u8);
+            let mut area = egui::ScrollArea::vertical().id_salt(salt).auto_shrink([false, false]).max_width(width);
+            // The header just folded or unfolded, moving the page's top: scroll
+            // by the same amount so the content stays put on screen.
+            let page = egui::Id::new(salt);
+            let top = frame_rect.min.y;
+            if let Some((_, last_top, last_y)) = app.detail_top.filter(|(id, t, _)| *id == page && *t != top) {
+                area = area.vertical_scroll_offset((last_y + top - last_top).max(0.0));
+            }
             let to_bottom = app.shot_scroll == Some(f32::MAX);
             if let Some(y) = app.shot_scroll.filter(|_| !to_bottom) {
                 area = area.vertical_scroll_offset(y);
@@ -151,9 +164,13 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 }
             });
             // Scrolled into the page: the header slims down (next frame), like
-            // GitHub's sticky bar. Two thresholds so it doesn't flicker.
+            // GitHub's sticky bar. Folding takes the header's lost height off the
+            // offset, so fold only once that still leaves us past the unfold line;
+            // otherwise short pages bounce between the two.
             let y = out.state.offset.y;
-            app.detail_scrolled = if app.detail_scrolled { y > 10.0 } else { y > 120.0 };
+            app.detail_top = Some((page, top, y));
+            let [full_h, slim_h] = app.header_h;
+            app.detail_scrolled = if app.detail_scrolled { y > 10.0 } else { y > 120.0_f32.max(full_h - slim_h + 40.0) };
         }
     }
 }

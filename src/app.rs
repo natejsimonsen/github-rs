@@ -319,6 +319,11 @@ pub struct App {
     pub details_wide: bool,
     /// The PR page is scrolled down, so its header shows slim.
     pub detail_scrolled: bool,
+    /// Header heights seen so far, full and slim, so it can fold without a jump.
+    pub header_h: [f32; 2],
+    /// Last frame's PR page: which one, where its scroll area started, and
+    /// how far down it was.
+    pub detail_top: Option<(egui::Id, f32, f32)>,
     /// After switching lists, select its first PR once it loads.
     follow_list: bool,
     pub composer: String,
@@ -418,6 +423,8 @@ impl App {
             details_folded: false,
             details_wide: true,
             detail_scrolled: false,
+            header_h: [0.0; 2],
+            detail_top: None,
             tree_narrow: false,
             tree_open_narrow: false,
             composer: String::new(),
