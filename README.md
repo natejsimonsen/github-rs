@@ -235,3 +235,4 @@ On Windows and Linux, use `Ctrl` instead of `⌘`. Double-click a PR to open it 
   write to GitHub): build with `cargo build --release --features snapshot`,
   then add `GITHUB_PRS_OFFSCREEN=1`. `GITHUB_PRS_SCRIPT` can click, type,
   and press keys first; see `src/snapshot.rs`.
+
