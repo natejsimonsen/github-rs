@@ -2,6 +2,8 @@
 
 A fast desktop app for GitHub pull requests, styled like github.com. Written in Rust.
 
+<img width="1491" height="897" alt="image" src="https://github.com/user-attachments/assets/7bb2fea1-72e1-4638-8eff-a8af61f7eaf4" />
+
 ## Install
 
 Pick one. Each gives you the same app.
