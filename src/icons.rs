@@ -43,6 +43,7 @@ pub enum Icon {
     File,
     FolderOpen,
     Code,
+    Gear,
 }
 
 pub fn show(ui: &mut Ui, icon: Icon, size: f32, color: Color32) -> Response {
@@ -144,6 +145,17 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             p.add(Shape::line(arc(PI * 0.1, PI * 0.9), stroke));
             line(&[(12.6, 1.8), (12.7, 4.7), (9.9, 4.9)]);
             line(&[(3.4, 14.2), (3.3, 11.3), (6.1, 11.1)]);
+        }
+        Icon::Gear => {
+            // Eight teeth around a ring with a hole.
+            let teeth = Stroke::new(2.25 * s, color);
+            for i in 0..8 {
+                let a = i as f32 / 8.0 * std::f32::consts::TAU;
+                let (c, sn) = (a.cos(), a.sin());
+                p.line_segment([at(8.0 + 4.5 * c, 8.0 + 4.5 * sn), at(8.0 + 6.75 * c, 8.0 + 6.75 * sn)], teeth);
+            }
+            ring(8.0, 8.0, 4.5);
+            ring(8.0, 8.0, 1.75);
         }
         Icon::Eye => {
             let pts: Vec<Pos2> = (0..=24)

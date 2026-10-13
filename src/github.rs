@@ -563,10 +563,11 @@ const EXTRA_FIELDS: &str = "
       __typename ... on CheckRun { name status conclusion } ... on StatusContext { context state }
     } } } } } }";
 
-/// `closed` switches every search between open and closed PRs.
+/// `closed` switches every search between open and closed PRs. Ignored
+/// repos (settings.json) are left out of all of them.
 pub fn full_query(q: &str, closed: bool) -> String {
     let state = if closed { "is:closed" } else { "is:open" };
-    format!("is:pr {state} archived:false {q}")
+    format!("is:pr {state} archived:false {q}{}", crate::settings::exclusions())
 }
 
 impl Client {
@@ -672,6 +673,13 @@ impl Client {
     pub fn viewer(&self) -> Result<String> {
         let data = self.graphql("query { viewer { login } }", json!({}))?;
         Ok(data["viewer"]["login"].as_str().unwrap_or_default().to_string())
+    }
+
+    /// The organizations you belong to, for the ignore list in Settings.
+    pub fn orgs(&self) -> Result<Vec<String>> {
+        let data = self.graphql("query { viewer { organizations(first: 100) { nodes { login } } } }", json!({}))?;
+        let nodes = data["viewer"]["organizations"]["nodes"].as_array().cloned().unwrap_or_default();
+        Ok(nodes.iter().filter_map(|n| n["login"].as_str().map(str::to_string)).collect())
     }
 
     /// Step 1 of loading a list: a lean search so rows show up fast.

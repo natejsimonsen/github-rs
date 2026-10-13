@@ -13,6 +13,7 @@ mod github;
 mod icons;
 mod images;
 mod markdown;
+mod settings;
 #[cfg(feature = "snapshot")]
 mod snapshot;
 mod syntax;

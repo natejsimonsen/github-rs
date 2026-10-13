@@ -19,6 +19,7 @@ const PREFETCH_WORKERS: usize = 3;
 pub enum Msg {
     Token(Option<(String, Source)>),
     Viewer(github::Result<String>),
+    Orgs(github::Result<Vec<String>>),
     List {
         key: String,
         result: github::Result<ListResult>,
@@ -256,6 +257,9 @@ pub enum Action {
     /// Look for a gh / environment token again.
     FindToken,
     SignOut,
+    OpenSettings,
+    /// Leave an owner or "owner/repo" out of every list (true), or bring it back.
+    SetIgnored(String, bool),
 }
 
 pub struct Toast {
@@ -303,6 +307,11 @@ pub struct App {
     viewed_pending: HashMap<(String, String), bool>,
     /// The ⌘K "Go to pull request" box, when open.
     pub goto: Option<GoTo>,
+    /// settings.json, and whether its window is open.
+    pub settings: crate::settings::Settings,
+    pub settings_open: bool,
+    /// Your organizations, once Settings has asked for them.
+    pub orgs: Option<Vec<String>>,
     goto_seq: u64,
     /// The window is too narrow for the list and the PR side by side.
     pub narrow: bool,
@@ -415,6 +424,9 @@ impl App {
             collapsed: HashMap::new(),
             viewed_pending: HashMap::new(),
             goto: None,
+            settings: crate::settings::load(),
+            settings_open: false,
+            orgs: None,
             goto_seq: 0,
             follow_list: false,
             narrow: false,
@@ -517,8 +529,9 @@ impl App {
     }
 
     pub fn list_key(&self, view: &View) -> String {
-        // `state_fits` reads the open/closed half back out of this.
-        format!("list-{}-{}", self.closed, view.query())
+        // `state_fits` reads the open/closed half back out of this. The ignore
+        // list is part of it, so changing that never shows stale rows.
+        format!("list-{}-{}{}", self.closed, view.query(), crate::settings::exclusions())
     }
 
     pub fn current_list(&self) -> Option<&Loaded<ListResult>> {
@@ -687,6 +700,7 @@ impl App {
             let (what, stale) = match &msg {
                 Msg::Token(_) => ("token", false),
                 Msg::Viewer(_) => ("viewer", false),
+                Msg::Orgs(_) => ("orgs", false),
                 Msg::List { stale, .. } => ("list", *stale),
                 Msg::ListRows { .. } => ("list rows", false),
                 Msg::ListMore { .. } => ("more rows", false),
@@ -903,6 +917,13 @@ impl App {
                     self.expanded.remove(&(pr_id.clone(), path));
                     self.diff_layouts.remove(&pr_id);
                     self.show_toast(format!("Couldn't load the file: {e}"), true);
+                }
+            },
+            Msg::Orgs(result) => match result {
+                Ok(orgs) => self.orgs = Some(orgs),
+                Err(e) => {
+                    self.orgs = Some(Vec::new());
+                    self.show_toast(format!("Couldn't load your organizations: {e}"), true);
                 }
             },
             Msg::Emojis(result) => {
@@ -1178,6 +1199,23 @@ impl App {
                 }
             }
             Action::Refresh => self.refresh_all(),
+            Action::OpenSettings => {
+                self.settings_open = true;
+                if self.orgs.is_none() {
+                    self.orgs = Some(Vec::new());
+                    self.spawn(|c, tx| {
+                        let _ = tx.send(Msg::Orgs(c.orgs()));
+                    });
+                }
+            }
+            Action::SetIgnored(entry, on) => {
+                self.settings.set_ignored(&entry, on);
+                if let Err(e) = crate::settings::save(&self.settings) {
+                    self.show_toast(format!("Couldn't save settings: {e}"), true);
+                }
+                self.reset_list_scroll();
+                self.refresh_all();
+            }
             Action::OpenUrl(u) => util::open_url(&u),
             Action::Copy(s) => {
                 ctx.copy_text(s);
@@ -1652,6 +1690,7 @@ impl eframe::App for App {
             self.shortcuts(&ctx);
             views::main(self, ui);
             views::goto_box(self, &ctx);
+            views::settings_box(self, &ctx);
         } else {
             views::sign_in(self, ui);
         }

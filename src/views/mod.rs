@@ -83,6 +83,10 @@ fn header(app: &mut App, ui: &mut Ui, p: &Palette) {
                         });
                     }
                     ui.add_space(4.0);
+                    if icon_button(ui, Icon::Gear, "Settings", p).clicked() {
+                        app.actions.push(Action::OpenSettings);
+                    }
+                    ui.add_space(4.0);
                     let loading = app.lists.values().any(|l| l.loading);
                     if loading {
                         // Same button frame, with a spinner in it.
@@ -190,6 +194,104 @@ fn loaded_prs(app: &App) -> Vec<&crate::github::PrSummary> {
 }
 
 /// ⌘K: type a PR number, `owner/repo#123`, or paste a link to open it.
+/// Settings: which owners and repos to leave out of every list. Offers your
+/// organizations, every owner and repo in the lists loaded so far, and
+/// whatever is already ignored (its PRs are gone from the lists).
+pub fn settings_box(app: &mut App, ctx: &egui::Context) {
+    if !app.settings_open {
+        return;
+    }
+    // Owner -> its repos, one entry per owner however GitHub cased it.
+    let mut owners: Vec<(String, Vec<String>)> = Vec::new();
+    let mut add = |entry: &str| {
+        let owner = entry.split_once('/').map_or(entry, |(o, _)| o);
+        if owner.is_empty() {
+            return;
+        }
+        let i = owners.iter().position(|(o, _)| o.eq_ignore_ascii_case(owner)).unwrap_or_else(|| {
+            owners.push((owner.to_string(), Vec::new()));
+            owners.len() - 1
+        });
+        let repos = &mut owners[i].1;
+        if entry.contains('/') && !repos.iter().any(|r| r.eq_ignore_ascii_case(entry)) {
+            repos.push(entry.to_string());
+        }
+    };
+    add(&app.viewer);
+    for org in app.orgs.iter().flatten() {
+        add(org);
+    }
+    for list in app.lists.values().filter_map(|l| l.data.as_ref()) {
+        for row in &list.rows {
+            add(&row.repository.name_with_owner);
+        }
+    }
+    for entry in &app.settings.ignored_repositories {
+        add(entry.trim());
+    }
+    owners.sort_by_key(|(o, _)| o.to_lowercase());
+    for (_, repos) in &mut owners {
+        repos.sort_by_key(|r| r.to_lowercase());
+    }
+
+    let p = theme::palette(ctx);
+    let id = egui::Id::new("settings");
+    let area = egui::Modal::default_area(id).anchor(egui::Align2::CENTER_TOP, vec2(0.0, 96.0));
+    let frame = Frame::new().fill(p.overlay).stroke(Stroke::new(1.0, p.border)).corner_radius(12).inner_margin(Margin::same(20)).shadow(egui::Shadow {
+        offset: [0, 12],
+        blur: 48,
+        spread: 0,
+        color: Color32::from_black_alpha(if p.dark { 180 } else { 70 }),
+    });
+    let mut changes = Vec::new();
+    let mut done = false;
+    let resp = egui::Modal::new(id).area(area).frame(frame).backdrop_color(p.backdrop).show(ctx, |ui| {
+        ui.set_width(460.0);
+        ui.label(RichText::new("Settings").font(theme::bold(18.0)).color(p.fg));
+        ui.add_space(12.0);
+        ui.label(RichText::new("Ignored repositories").font(theme::bold(14.0)).color(p.fg));
+        ui.label(RichText::new("Pull requests from checked owners and repos are left out of every list.").size(13.0).color(p.fg_muted));
+        ui.add_space(8.0);
+        let max_h = (ctx.content_rect().height() - 340.0).max(160.0);
+        egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+            for (owner, repos) in &owners {
+                let mut on = app.settings.is_ignored(owner);
+                if ui.checkbox(&mut on, RichText::new(owner).font(theme::bold(13.0)).color(p.fg)).changed() {
+                    changes.push((owner.clone(), on));
+                }
+                let owner_on = on;
+                for repo in repos {
+                    ui.horizontal(|ui| {
+                        ui.add_space(24.0);
+                        let name = repo.split_once('/').map_or(repo.as_str(), |(_, n)| n);
+                        // A whole owner ignored covers its repos.
+                        let mut on = owner_on || app.settings.is_ignored(repo);
+                        let resp = ui.add_enabled(!owner_on, egui::Checkbox::new(&mut on, RichText::new(name).size(13.0).color(p.fg)));
+                        if resp.changed() {
+                            changes.push((repo.clone(), on));
+                        }
+                    });
+                }
+            }
+        });
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            if let Some(path) = crate::settings::path() {
+                ui.label(RichText::new(format!("Saved in {}", path.display())).size(11.0).color(p.fg_muted));
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                done = ui.add(button("Done", p)).clicked();
+            });
+        });
+    });
+    for (entry, on) in changes {
+        app.actions.push(Action::SetIgnored(entry, on));
+    }
+    if done || resp.should_close() {
+        app.settings_open = false;
+    }
+}
+
 pub fn goto_box(app: &mut App, ctx: &egui::Context) {
     let default_repo = app.default_repo();
     let raw = app.goto.as_ref().map(|g| g.text.trim().to_string()).unwrap_or_default();
