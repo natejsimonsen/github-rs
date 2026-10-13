@@ -3,6 +3,8 @@
 mod detail;
 mod list;
 
+pub(crate) use detail::{fold_header, keep_still};
+
 use crate::app::{Action, App, Panel};
 use crate::github::PrDetail;
 use crate::icons::{self, Icon};

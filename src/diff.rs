@@ -745,13 +745,19 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
     let char_w = ui.fonts_mut(|f| f.glyph_width(&theme::mono(12.0), 'M'));
     // Salted per PR or commit, so pages don't inherit each other's scroll.
     let mut area = egui::ScrollArea::vertical().id_salt(("diff", current_id)).auto_shrink([false, false]);
+    // A PR's diff folds the header like its other tabs; a commit's header is always slim.
+    let page = egui::Id::new(("diff", current_id));
+    let top = ui.available_rect_before_wrap().min.y;
+    if !src.commit {
+        area = crate::views::keep_still(app, area, page, top);
+    }
     if let Some(y) = ui.ctx().data_mut(|d| d.remove_temp::<f32>(jump_id)) {
         area = area.vertical_scroll_offset(y);
     }
     let pan_id = egui::Id::new(("diff-pan", files.as_ptr()));
     let mut pans: Vec<f32> = ui.ctx().data(|d| d.get_temp::<Vec<f32>>(pan_id)).unwrap_or_default();
     pans.resize(files.len(), 0.0);
-    area.show_viewport(ui, |ui, viewport| {
+    let out = area.show_viewport(ui, |ui, viewport| {
         // Room for the scrollbar, so it never covers the boxes' right edge.
         let width = ui.available_width() - 14.0;
         let (rect, _) = ui.allocate_exact_size(vec2(width, layout.total), Sense::hover());
@@ -928,6 +934,9 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
         }
     });
     ui.ctx().data_mut(|d| d.insert_temp(pan_id, pans));
+    if !src.commit {
+        crate::views::fold_header(app, page, top, out.state.offset.y);
+    }
 }
 
 /// A file's header: fold chevron, change count, diffstat, path, copy, menu,
