@@ -751,7 +751,8 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
     if !src.commit {
         area = crate::views::keep_still(app, area, page, top);
     }
-    if let Some(y) = ui.ctx().data_mut(|d| d.remove_temp::<f32>(jump_id)) {
+    let jump = ui.ctx().data_mut(|d| d.remove_temp::<f32>(jump_id));
+    if let Some(y) = jump {
         area = area.vertical_scroll_offset(y);
     }
     let pan_id = egui::Id::new(("diff-pan", files.as_ptr()));
@@ -787,6 +788,14 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
             }
         }
 
+        // The current file's header stays at the top while its lines scroll
+        // by, until the next file pushes it off, like GitHub.
+        let head_row = layout.tops.partition_point(|&t| t < layout.file_tops[current]);
+        let sticky = match layout.rows.get(head_row) {
+            Some(Row::Header(_, false)) if layout.file_tops[current] < viewport.min.y => Some(current),
+            _ => None,
+        };
+
         let first = layout.tops.partition_point(|&t| t + LINE_H < viewport.min.y).saturating_sub(1);
         for i in first..layout.rows.len() {
             let top = layout.tops[i];
@@ -797,7 +806,10 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
             let fi = layout.row_file[i];
             let r = Rect::from_min_size(pos2(origin.x, origin.y + top), vec2(width, row.height()));
             match row {
-                Row::Header(fi, collapsed) => file_header(app, ui, p, &files[*fi], *fi, r, *collapsed, src),
+                Row::Header(fi, _) if sticky == Some(*fi) => {}
+                Row::Header(fi, collapsed) => {
+                    file_header(app, ui, p, &files[*fi], *fi, r, *collapsed, src);
+                }
                 Row::Line { kind, old, new, text } => {
                     let (bg, num_bg) = match kind {
                         Kind::Add => (p.diff_add, p.diff_add_num),
@@ -932,17 +944,42 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
                 pans[fi] = (pans[fi] + resp.drag_delta().x * per_px).clamp(0.0, max);
             }
         }
+
+        if let Some(fi) = sticky {
+            let y = viewport.min.y.min(layout.file_bottoms[fi] - HEADER_H);
+            let r = Rect::from_min_size(pos2(origin.x, origin.y + y), vec2(width, HEADER_H));
+            // Folding it from up here: go back to it, so the next file
+            // starts right below.
+            if file_header(app, ui, p, &files[fi], fi, r, false, src) {
+                ui.ctx().data_mut(|d| d.insert_temp(jump_id, layout.file_tops[fi]));
+            }
+        }
     });
     ui.ctx().data_mut(|d| d.insert_temp(pan_id, pans));
     if !src.commit {
-        crate::views::fold_header(app, page, top, out.state.offset.y);
+        // A jump (tree pick, folding the pinned file) leaves the header as is
+        // until the user scrolls; landing near the top would unfold it and
+        // push the file we jumped to out of view.
+        let y = out.state.offset.y;
+        let hold_id = egui::Id::new(("diff-fold-hold", current_id));
+        if jump.is_some() {
+            ui.ctx().data_mut(|d| d.insert_temp(hold_id, y));
+        }
+        let wheel = ui.input(|i| i.smooth_scroll_delta.y != 0.0);
+        let held = ui.ctx().data(|d| d.get_temp::<f32>(hold_id)).is_some_and(|h| h == y && !wheel);
+        if held {
+            app.detail_top = Some((page, top, y));
+        } else {
+            ui.ctx().data_mut(|d| d.remove::<f32>(hold_id));
+            crate::views::fold_header(app, page, top, y);
+        }
     }
 }
 
 /// A file's header: fold chevron, change count, diffstat, path, copy, menu,
-/// and the Viewed checkbox.
+/// and the Viewed checkbox. True when a click folds the file.
 #[allow(clippy::too_many_arguments)]
-fn file_header(app: &mut App, ui: &mut Ui, p: &Palette, f: &FileDiff, fi: usize, r: Rect, collapsed: bool, src: &Source<'_>) {
+fn file_header(app: &mut App, ui: &mut Ui, p: &Palette, f: &FileDiff, fi: usize, r: Rect, collapsed: bool, src: &Source<'_>) -> bool {
     let painter = ui.painter();
     let resp = ui.interact(r, egui::Id::new(("file-header", fi)), Sense::click());
     let right = r.right() - 12.0;
@@ -1020,10 +1057,15 @@ fn file_header(app: &mut App, ui: &mut Ui, p: &Palette, f: &FileDiff, fi: usize,
     let copy_resp = copy_resp.tip("Copy path");
     if viewed_resp.clicked() {
         app.actions.push(Action::SetViewed(f.filename.clone(), !f.viewed));
+        !f.viewed
     } else if copy_resp.clicked() {
         app.actions.push(Action::Copy(f.filename.clone()));
+        false
     } else if resp.clicked() && !menu_resp.clicked() {
         app.actions.push(Action::ToggleFile(f.filename.clone()));
+        !collapsed
+    } else {
+        false
     }
 }
 
