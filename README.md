@@ -2,52 +2,6 @@
 
 A fast desktop app for GitHub pull requests, styled like github.com. Written in Rust.
 
-It shows your PRs, their conversation, commits, CI checks, and diffs. You can
-comment, approve, or request changes. It opens to **PRs you created** (10 at a
-time); the other tabs show review requests, assigned, mentioned, and involved.
-The search box takes normal GitHub search syntax (`repo:org/name label:bug`).
-Press **⌘K** to jump to any PR: type a number (`119316`), `owner/repo#123`,
-or paste a link. A pasted link opens right away.
-
-The timeline shows what happened, like on GitHub: commits pushed, labels,
-force-pushes, review requests, merges, and closes. Clicking a commit opens
-its own page in the app, with its message, parents, and diff; Esc goes back.
-Files changed has a folder tree with a filter box, and each wide file scrolls
-sideways on its own.
-Checks lists failures first, marks required checks, and folds skipped ones.
-
-In the conversation you can reply to code review threads, **Resolve** or
-**Unresolve** them, and **Quote reply** any comment from its ⋯ menu. The
-comment box has **Write / Preview** tabs; ⌘Enter posts. Comments render
-GitHub-style: tables, task lists, `> [!NOTE]` alerts, @mentions, #123 links,
-bare URLs, suggested changes, and color emoji (both 🎉 and `:tada:`), drawn
-with the same emoji pictures github.com uses.
-
-Code is syntax highlighted with tree-sitter in GitHub's colors: in diffs,
-review thread snippets, and fenced code blocks. About 110 languages are
-built in, picked by file name or the code block's language tag.
-
-Each PR shows its merge status at a glance: ready, blocked (and why),
-conflicts, out of date, or auto-merge on. It appears in the list rows and in a
-colored bar under the PR title. The bar also has a **Merge** button (with a
-merge-method menu and a confirm step), **Enable / Disable auto-merge**, and
-**Approve** on PRs you didn't write. Text in the comment box goes with the
-approval. Once you've approved, the button reads "✓ Approved".
-
-The app checks merge requirements itself rather than trusting GitHub's summary
-alone: an approval from someone else, required checks passing, all
-conversations resolved, and no conflicts. **policy-bot is always shown as
-passing**, since it reports the same failure on every PR.
-
-In **Files changed**, each file has a **Viewed** checkbox, just like on
-github.com. It syncs with GitHub, folds the file away, and the top shows
-"N / M files viewed".
-
-Every sidebar collapses: the PR list (to a strip of PR icons), the details
-column next to the conversation, and the file list next to the diff. Click the
-panel icon, use the shortcut, or drag a panel's edge closed. The app remembers
-what you left open.
-
 ## Install
 
 Pick one. Each gives you the same app.
