@@ -27,9 +27,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     let known_empty = other_counts.is_some_and(|(o, c)| if app.closed { c == 0 } else { o == 0 });
     plain_box(ui, |ui| {
         // Box header: "44 Open   120 Closed"
-        egui::Frame::new().fill(p.canvas_subtle).corner_radius(CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }).inner_margin(Margin::symmetric(8, 8)).show(
-            ui,
-            |ui| {
+        egui::Frame::new()
+            .fill(p.canvas_subtle)
+            .corner_radius(CornerRadius { nw: theme::RADIUS, ne: theme::RADIUS, sw: 0, se: 0 })
+            .inner_margin(Margin::symmetric(8, 8))
+            .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
@@ -50,8 +52,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         }
                     });
                 });
-            },
-        );
+            });
         row_separator(ui);
 
         if let Some(e) = &error {
@@ -75,9 +76,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 } else if data.is_none() && error.is_none() && !known_empty {
                     // Nothing came back at all (e.g. cache-only mode): don't
                     // claim the search is empty.
-                    ui.label(RichText::new("Not loaded yet").font(theme::bold(16.0)).color(p.fg));
+                    ui.label(RichText::new("Not loaded yet").font(theme::bold(theme::TEXT_LARGE)).color(p.fg));
                     ui.add_space(4.0);
-                    if super::link(ui, "Refresh", 14.0, p).clicked() {
+                    if super::link(ui, "Refresh", theme::TEXT_BODY, p).clicked() {
                         app.actions.push(Action::Refresh);
                     }
                 } else if error.is_none() {
@@ -87,24 +88,27 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     let (here, there) = if app.closed { ("closed", "open") } else { ("open", "closed") };
                     if other > 0 {
                         // Same message as the PR pane: the other half has some.
-                        ui.label(RichText::new(format!("No {here} pull requests")).font(theme::bold(16.0)).color(p.fg));
+                        ui.label(RichText::new(format!("No {here} pull requests")).font(theme::bold(theme::TEXT_LARGE)).color(p.fg));
                         ui.add_space(4.0);
-                        if super::link(ui, &format!("View {other} {there}"), 14.0, p).clicked() {
+                        if super::link(ui, &format!("View {other} {there}"), theme::TEXT_BODY, p).clicked() {
                             app.actions.push(Action::SetClosed(!app.closed));
                         }
                     } else {
-                        ui.label(RichText::new("No results matched your search.").font(theme::bold(16.0)).color(p.fg));
+                        ui.label(RichText::new("No results matched your search.").font(theme::bold(theme::TEXT_LARGE)).color(p.fg));
                         ui.add_space(4.0);
                         // Two short centered lines, so it fits a narrow list.
                         let line = |ui: &mut Ui, lead: &str, link: &str, tail: &str| {
-                            let w: f32 = [lead, link, tail].iter().map(|t| ui.painter().layout_no_wrap(t.to_string(), theme::body(14.0), p.fg).size().x).sum();
+                            let w: f32 = [lead, link, tail]
+                                .iter()
+                                .map(|t| ui.painter().layout_no_wrap(t.to_string(), theme::body(theme::TEXT_BODY), p.fg).size().x)
+                                .sum();
                             let mut clicked = false;
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 0.0;
                                 ui.add_space(((ui.available_width() - w) / 2.0).max(0.0));
-                                ui.label(RichText::new(lead).size(14.0).color(p.fg_muted));
-                                clicked = super::link(ui, link, 14.0, p).clicked();
-                                ui.label(RichText::new(tail).size(14.0).color(p.fg_muted));
+                                ui.label(RichText::new(lead).size(theme::TEXT_BODY).color(p.fg_muted));
+                                clicked = super::link(ui, link, theme::TEXT_BODY, p).clicked();
+                                ui.label(RichText::new(tail).size(theme::TEXT_BODY).color(p.fg_muted));
                             });
                             clicked
                         };
@@ -183,7 +187,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         app.actions.push(Action::LoadMore);
                     }
                     ui.add_space(6.0);
-                    let note = ui.label(RichText::new(format!("Showing {} of {total}", rows.len())).size(12.0).color(p.fg_muted));
+                    let note = ui.label(RichText::new(format!("Showing {} of {total}", rows.len())).size(theme::TEXT_SMALL).color(p.fg_muted));
                     if scroll_to == Some(last) {
                         note.scroll_to_me(Some(egui::Align::Max));
                         ui.ctx().data_mut(|d| d.insert_temp(shown_id, sel_id.clone()));
@@ -201,13 +205,13 @@ pub fn show(app: &mut App, ui: &mut Ui) {
 
 /// "12 Open" / "34 Closed" in the list header: icon and text are one button.
 fn state_toggle(ui: &mut Ui, p: &Palette, icon: Icon, text: &str, active: bool) -> egui::Response {
-    let font = if active { theme::bold(14.0) } else { theme::body(14.0) };
-    let (rect, resp) =
-        ui.allocate_exact_size(vec2(ui.painter().layout_no_wrap(text.to_string(), font.clone(), p.fg).size().x + 16.0 + 6.0 + 16.0, 32.0), Sense::click());
+    let font = if active { theme::bold(theme::TEXT_BODY) } else { theme::body(theme::TEXT_BODY) };
+    let w = ui.painter().layout_no_wrap(text.to_string(), font.clone(), p.fg).size().x + 16.0 + 6.0 + theme::ICON;
+    let (rect, resp) = ui.allocate_exact_size(vec2(w, theme::CONTROL_H), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, text));
     let color = if active || resp.hovered() { p.fg } else { p.fg_muted };
     let g = ui.painter().layout_no_wrap(text.to_string(), font, color);
-    let icon_rect = Rect::from_min_size(pos2(rect.left() + 8.0, rect.center().y - 8.0), vec2(16.0, 16.0));
+    let icon_rect = Rect::from_min_size(pos2(rect.left() + 8.0, rect.center().y - theme::ICON / 2.0), vec2(theme::ICON, theme::ICON));
     icons::paint(ui.painter(), icon_rect, icon, color);
     ui.painter().galley(pos2(icon_rect.right() + 6.0, rect.center().y - g.size().y / 2.0), g, color);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -221,23 +225,36 @@ pub fn rail(app: &mut App, ui: &mut Ui) {
         ui.spacing_mut().item_spacing.y = 4.0;
         // Which list this is, as an icon (GitHub never shortens labels).
         let (section, icon) = match &app.view {
-            View::Section(i) => (SECTIONS[*i].title, [Icon::Branch, Icon::Person, Icon::Comment, Icon::Eye, Icon::Sync][*i % 5]),
+            // "Created" is your PRs: the same PR glyph as the list header.
+            View::Section(i) => (SECTIONS[*i].title, [Icon::PrOpen, Icon::Person, Icon::Comment, Icon::Eye, Icon::Sync][*i % 5]),
             View::Search(_) => ("Search", Icon::Search),
         };
+        // How many PRs the list holds, once known: "12 open".
+        let total = app.current_list().and_then(|l| l.data.as_ref()).map(|d| if app.closed { d.closed } else { d.open });
+        let state = if app.closed { "closed" } else { "open" };
         // Clicking it opens the list, like ⌘B.
-        let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 26.0), Sense::click());
+        let (rect, resp) = ui.allocate_exact_size(vec2(36.0, theme::CONTROL_H), Sense::click());
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Show {section}")));
-        ui.painter().rect_filled(rect, 6.0, if resp.hovered() { p.accent_subtle.gamma_multiply(1.6) } else { p.accent_subtle });
-        icons::paint(ui.painter(), Rect::from_center_size(rect.center(), vec2(14.0, 14.0)), icon, p.accent);
-        super::tip(&resp, &format!("{section} · Show list (⌘B)"));
+        ui.painter().rect_filled(rect, theme::RADIUS, if resp.hovered() { p.accent_subtle.gamma_multiply(1.6) } else { p.accent_subtle });
+        icons::paint(ui.painter(), super::icon_rect(rect), icon, p.accent);
+        let count = total.map(|n| format!(" · {n} {state}")).unwrap_or_default();
+        super::tip(&resp, &format!("{section}{count} · Show list (⌘B)"));
         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             app.actions.push(Action::TogglePanel(crate::app::Panel::List));
         }
-        // A rule between the section badge and the PRs, so it doesn't read as one.
-        ui.add_space(6.0);
-        let y = ui.cursor().top();
-        ui.painter().hline(rect.x_range(), y, Stroke::new(1.0, p.border));
-        ui.add_space(6.0);
+        // The count under the badge labels it, and says "0" for an empty list.
+        if let Some(n) = total {
+            let label = if n > 999 { "999+".to_string() } else { n.to_string() };
+            ui.add(egui::Label::new(RichText::new(label).font(theme::bold(theme::TEXT_SMALL)).color(p.fg_muted)).selectable(false));
+        }
+        // A rule between the section badge and the PRs, so it doesn't read as
+        // one. No PRs, no rule.
+        if !rows.is_empty() {
+            ui.add_space(6.0);
+            let y = ui.cursor().top();
+            ui.painter().hline(rect.x_range(), y, Stroke::new(1.0, p.border));
+            ui.add_space(6.0);
+        }
         let more = app.current_list().and_then(|l| l.data.as_ref()).filter(|d| d.next.is_some()).map(|d| if app.closed { d.closed } else { d.open });
         let busy = app.loading_more.contains(&app.list_key(&app.view));
         let shown_id = egui::Id::new("rail-shown-selection");
@@ -254,15 +271,15 @@ pub fn rail(app: &mut App, ui: &mut Ui) {
                 }
                 resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, format!("#{} {}", pr.number, pr.title)));
                 if selected {
-                    ui.painter().rect_filled(rect, 6.0, p.selected_row);
+                    ui.painter().rect_filled(rect, theme::RADIUS, p.selected_row);
                     let bar = Rect::from_min_size(pos2(rect.left() - 6.0, rect.top() + 6.0), vec2(2.0, rect.height() - 12.0));
                     ui.painter().rect_filled(bar, 1.0, p.accent_emphasis);
                 } else if resp.hovered() {
                     // The rail sits on canvas_subtle, so hover needs a stronger tint.
-                    ui.painter().rect_filled(rect, 6.0, p.border.gamma_multiply(0.45));
+                    ui.painter().rect_filled(rect, theme::RADIUS, p.border.gamma_multiply(0.45));
                 }
                 let (icon, color, _) = pr_icon(&pr.state, pr.is_draft, p);
-                icons::paint(ui.painter(), rect.shrink(10.0), icon, color);
+                icons::paint(ui.painter(), super::icon_rect(rect), icon, color);
                 // A small dot shows merge readiness at a glance.
                 // The dot is merge readiness (not CI), same color as the list's chip.
                 let detail = fresher_detail(app, pr);
@@ -291,14 +308,14 @@ pub fn rail(app: &mut App, ui: &mut Ui) {
                 let (rect, resp) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::click());
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Load more"));
                 if resp.hovered() {
-                    ui.painter().rect_filled(rect, 6.0, p.border.gamma_multiply(0.45));
+                    ui.painter().rect_filled(rect, theme::RADIUS, p.border.gamma_multiply(0.45));
                 }
                 if busy {
-                    egui::Spinner::new().size(16.0).paint_at(ui, Rect::from_center_size(rect.center(), vec2(16.0, 16.0)));
+                    egui::Spinner::new().size(theme::ICON).paint_at(ui, super::icon_rect(rect));
                 } else {
                     let left = total.saturating_sub(rows.len() as u64);
                     let label = if left > 99 { "+99".to_string() } else { format!("+{left}") };
-                    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, theme::bold(12.0), p.fg_muted);
+                    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, label, theme::bold(theme::TEXT_SMALL), p.fg_muted);
                 }
                 super::tip(&resp, &format!("Showing {} of {total} · Load more", rows.len()));
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
@@ -311,16 +328,23 @@ pub fn rail(app: &mut App, ui: &mut Ui) {
 
 /// GitHub's joined filter buttons: Created | Assigned | ... They never
 /// wrap: on a narrow list they tighten, then the rest go under "More ▾".
+/// A custom search adds a lit "Search" button at the end, so it's clear
+/// why no section is lit.
 fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
     let avail = ui.available_width();
-    let widths =
-        |pad: f32| -> Vec<f32> { SECTIONS.iter().map(|s| ui.painter().layout_no_wrap(s.title.to_string(), theme::bold(13.0), p.fg).size().x + pad).collect() };
+    let font = theme::bold(theme::TEXT_DENSE);
+    let text_w = |text: &str| ui.painter().layout_no_wrap(text.to_string(), font.clone(), p.fg).size().x;
+    let custom = matches!(app.view, View::Search(_));
+    const SEARCH: &str = "Search";
+    let widths = |pad: f32| -> Vec<f32> { SECTIONS.iter().map(|s| text_w(s.title) + pad).collect() };
+    let search_w = |pad: f32| if custom { text_w(SEARCH) + pad } else { 0.0 };
     let mut pad = 24.0;
     let mut w = widths(pad);
-    if w.iter().sum::<f32>() > avail {
+    if w.iter().sum::<f32>() + search_w(pad) > avail {
         pad = 14.0;
         w = widths(pad);
     }
+    let avail = avail - search_w(pad);
     let active = match app.view {
         View::Section(i) => Some(i),
         View::Search(_) => None,
@@ -333,23 +357,20 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
             Some(i) if i >= shown => format!("{} ▾", SECTIONS[i].title),
             _ => "More ▾".to_string(),
         };
-        ui.painter().layout_no_wrap(label, theme::bold(13.0), p.fg).size().x + pad
+        text_w(&label) + pad
     };
     let mut shown = SECTIONS.len();
     while shown > 1 && w[..shown].iter().sum::<f32>() + if shown < SECTIONS.len() { more_w(shown) } else { 0.0 } > avail {
         shown -= 1;
     }
+    let (more_width, search_width) = (more_w(shown), search_w(pad));
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        let n = if shown < SECTIONS.len() { shown + 1 } else { shown };
+        let n = shown + usize::from(shown < SECTIONS.len()) + usize::from(custom);
         let seg = |ui: &mut Ui, i: usize, text: &str, width: f32, on: bool| -> egui::Response {
-            let (rect, resp) = ui.allocate_exact_size(vec2(width, 32.0), Sense::click());
-            let radius = CornerRadius {
-                nw: if i == 0 { 6 } else { 0 },
-                sw: if i == 0 { 6 } else { 0 },
-                ne: if i == n - 1 { 6 } else { 0 },
-                se: if i == n - 1 { 6 } else { 0 },
-            };
+            let (rect, resp) = ui.allocate_exact_size(vec2(width, theme::CONTROL_H), Sense::click());
+            let (first, last) = (if i == 0 { theme::RADIUS } else { 0 }, if i == n - 1 { theme::RADIUS } else { 0 });
+            let radius = CornerRadius { nw: first, sw: first, ne: last, se: last };
             let fill = if on {
                 p.accent_emphasis
             } else if resp.hovered() {
@@ -358,7 +379,7 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
                 p.canvas
             };
             ui.painter().rect(rect, radius, fill, Stroke::new(1.0, if on { p.accent_emphasis } else { p.border }), StrokeKind::Inside);
-            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, theme::bold(13.0), if on { Color32::WHITE } else { p.fg });
+            ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, font.clone(), if on { p.fg_on_emphasis } else { p.fg });
             resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, text));
             resp.on_hover_cursor(egui::CursorIcon::PointingHand)
         };
@@ -371,8 +392,7 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
             // The active section stays visible: it names the "More" button.
             let hidden_active = active.filter(|&i| i >= shown);
             let label = hidden_active.map(|i| format!("{} ▾", SECTIONS[i].title)).unwrap_or_else(|| "More ▾".into());
-            let width = ui.painter().layout_no_wrap(label.clone(), theme::bold(13.0), p.fg).size().x + pad;
-            let resp = seg(ui, shown, &label, width, hidden_active.is_some());
+            let resp = seg(ui, shown, &label, more_width, hidden_active.is_some());
             egui::Popup::menu(&resp).align(egui::RectAlign::BOTTOM_START).show(|ui| {
                 ui.set_max_width(200.0);
                 ui.spacing_mut().item_spacing.y = 0.0;
@@ -380,15 +400,16 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
                 let text_x = if hidden_active.is_some() { 36.0 } else { 12.0 };
                 for (i, section) in SECTIONS.iter().enumerate().skip(shown) {
                     let on = active == Some(i);
-                    let (r, row) = ui.allocate_exact_size(vec2(188.0, 32.0), Sense::click());
+                    let (r, row) = ui.allocate_exact_size(vec2(188.0, theme::CONTROL_H), Sense::click());
                     row.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, section.title));
                     if row.hovered() {
-                        ui.painter().rect_filled(r.shrink2(vec2(4.0, 0.0)), 6.0, p.hover_row);
+                        ui.painter().rect_filled(r.shrink2(vec2(4.0, 0.0)), theme::RADIUS, p.hover_row);
                     }
                     if on {
-                        icons::paint(ui.painter(), Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(14.0, 14.0)), Icon::Check, p.fg);
+                        let check = Rect::from_center_size(pos2(r.left() + 20.0, r.center().y), vec2(theme::ICON, theme::ICON));
+                        icons::paint(ui.painter(), check, Icon::Check, p.fg);
                     }
-                    let font = if on { theme::bold(14.0) } else { theme::body(14.0) };
+                    let font = if on { theme::bold(theme::TEXT_BODY) } else { theme::body(theme::TEXT_BODY) };
                     ui.painter().text(pos2(r.left() + text_x, r.center().y), egui::Align2::LEFT_CENTER, SECTIONS[i].title, font, p.fg);
                     if row.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                         app.actions.push(Action::SetView(View::Section(i)));
@@ -397,6 +418,12 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
                 }
             });
         }
+        if custom {
+            // Already lit; clicking it goes to the query to edit it.
+            if seg(ui, n - 1, SEARCH, search_width, true).tip("Custom search · Edit it below").clicked() {
+                app.focus_search = true;
+            }
+        }
     });
 }
 
@@ -404,64 +431,34 @@ fn subnav(app: &mut App, ui: &mut Ui, p: &Palette) {
 /// the scope, not just add to it. Enter runs it; Esc puts it back.
 fn search(app: &mut App, ui: &mut Ui, p: &Palette) {
     let id = egui::Id::new("search");
-    let focused = ui.memory(|m| m.has_focus(id));
-    if !focused {
+    if !ui.memory(|m| m.has_focus(id)) {
         app.search_text = app.display_query();
     }
-    let stroke = if focused { Stroke::new(2.0, p.accent_emphasis) } else { Stroke::new(1.0, p.border) };
-    egui::Frame::new()
-        .fill(p.canvas)
-        .stroke(stroke)
-        .corner_radius(6)
-        .inner_margin(Margin { left: 10, right: 10, top: if focused { 3 } else { 4 }, bottom: if focused { 3 } else { 4 } })
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                icons::show(ui, Icon::Search, 16.0, p.fg_muted);
-                // A custom search gets a × that goes back to your PRs.
-                let custom = matches!(app.view, View::Search(_));
-                let clearable = custom || app.search_text.trim() != app.display_query().trim();
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut app.search_text)
-                        .id(id)
-                        .hint_text(RichText::new("Search all pull requests").color(p.fg_muted))
-                        .frame(egui::Frame::NONE)
-                        .desired_width(ui.available_width() - if clearable { 28.0 + ui.spacing().item_spacing.x } else { 0.0 })
-                        .font(theme::body(14.0))
-                        .margin(vec2(4.0, 4.0)),
-                );
-                if app.focus_search {
-                    resp.request_focus();
-                    app.focus_search = false;
-                }
-                if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                    let q = app.search_text.clone();
-                    app.actions.push(Action::RunSearch(q));
-                }
-                if resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    app.search_text = app.display_query();
-                    resp.surrender_focus();
-                }
-                if clearable {
-                    // A 28px target around a 20px button: easy to hit.
-                    let (hit, x) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
-                    let r = Rect::from_center_size(hit.center(), vec2(20.0, 20.0));
-                    x.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Clear search"));
-                    if x.hovered() {
-                        ui.painter().rect_filled(r, 4.0, p.hover_row);
-                    }
-                    icons::paint(ui.painter(), r.shrink(3.0), Icon::X, if x.hovered() { p.fg } else { p.fg_muted });
-                    if x.tip("Clear search").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                        if custom {
-                            app.actions.push(Action::RunSearch(String::new()));
-                        } else {
-                            // Only typed, not run: just put the tab's query back.
-                            app.search_text = app.display_query();
-                            ui.memory_mut(|m| m.surrender_focus(id));
-                        }
-                    }
-                }
-            });
-        });
+    // A custom search gets a × that goes back to your PRs.
+    let custom = matches!(app.view, View::Search(_));
+    let clearable = custom || app.search_text.trim() != app.display_query().trim();
+    let (resp, cleared) = super::search_input(ui, id, &mut app.search_text, "Search all pull requests", clearable, "Clear search", p);
+    if app.focus_search {
+        resp.request_focus();
+        app.focus_search = false;
+    }
+    if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+        let q = app.search_text.clone();
+        app.actions.push(Action::RunSearch(q));
+    }
+    if resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        app.search_text = app.display_query();
+        resp.surrender_focus();
+    }
+    if cleared {
+        if custom {
+            app.actions.push(Action::RunSearch(String::new()));
+        } else {
+            // Only typed, not run: just put the tab's query back.
+            app.search_text = app.display_query();
+            ui.memory_mut(|m| m.surrender_focus(id));
+        }
+    }
 }
 
 /// A PR's details, if they're at least as new as the list's own data.
@@ -504,7 +501,8 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     // The right column is only as wide as what's in it: the comment count
     // and the assignees' faces. The title gets the rest.
     let who = &pr.assignees.nodes;
-    let comment_w = if comments > 0 { 24.0 + ui.painter().layout_no_wrap(comments.to_string(), theme::bold(12.0), p.fg_muted).size().x } else { 0.0 };
+    let comment_w =
+        if comments > 0 { 24.0 + ui.painter().layout_no_wrap(comments.to_string(), theme::bold(theme::TEXT_SMALL), p.fg_muted).size().x } else { 0.0 };
     let faces_w = if who.is_empty() { 0.0 } else { 20.0 + (who.len() - 1) as f32 * 12.0 + if comments > 0 { 8.0 } else { 0.0 } };
     let right = 16.0 + comment_w + faces_w + if comment_w + faces_w > 0.0 { 12.0 } else { 0.0 };
     let text_w = (width - left - right).max(80.0);
@@ -524,16 +522,16 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     // title, so it never breaks mid-name.
     // Decided by width, so every row in a list looks the same.
     if text_w < 260.0 {
-        job.append(&format!("{repo_name}\n"), 0.0, egui::TextFormat { font_id: theme::bold(12.0), color: p.fg_muted, ..Default::default() });
+        job.append(&format!("{repo_name}\n"), 0.0, egui::TextFormat { font_id: theme::bold(theme::TEXT_SMALL), color: p.fg_muted, ..Default::default() });
     } else {
-        job.append(&format!("{repo_name} "), 0.0, egui::TextFormat { font_id: theme::bold(14.0), color: p.fg_muted, ..Default::default() });
+        job.append(&format!("{repo_name} "), 0.0, egui::TextFormat { font_id: theme::bold(theme::TEXT_BODY), color: p.fg_muted, ..Default::default() });
     }
-    super::append_title(&mut job, &pr.title, 14.0, true, 0.0, p);
+    super::append_title(&mut job, &pr.title, theme::TEXT_BODY, true, 0.0, p);
     // Room for the CI icon, glued to the last word with no-break spaces so
     // it always sits right after the title.
     const CI_GAP: &str = "\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}\u{a0}";
     if ci.is_some() {
-        job.append(CI_GAP, 0.0, egui::TextFormat { font_id: theme::bold(14.0), color: Color32::TRANSPARENT, ..Default::default() });
+        job.append(CI_GAP, 0.0, egui::TextFormat { font_id: theme::bold(theme::TEXT_BODY), color: Color32::TRANSPARENT, ..Default::default() });
     }
     let hover_job = job.clone();
     let title = ui.painter().layout_job(job);
@@ -565,7 +563,7 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
         at
     };
     if let Some(at) = ci_at {
-        items.push(Item { at, size: vec2(16.0, 16.0), pill: None });
+        items.push(Item { at, size: vec2(theme::ICON, theme::ICON), pill: None });
     }
     // A line or two of labels at most; the rest become "+N".
     let first_cy = cy;
@@ -573,7 +571,7 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     let labels = &pr.labels.nodes;
     for (i, l) in labels.iter().enumerate() {
         let (bg, fg, border) = theme::label_colors(&l.color, p);
-        let g = ui.painter().layout_no_wrap(l.name.clone(), theme::bold(12.0), fg);
+        let g = ui.painter().layout_no_wrap(l.name.clone(), theme::bold(theme::TEXT_SMALL), fg);
         let size = vec2(g.size().x + 14.0, 20.0);
         let rest = labels.len() - i - 1;
         // Room for this label, plus a "+N" after it if more are coming.
@@ -582,7 +580,7 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
         // One extra line of labels at any width; the rest become "+N".
         if wraps && cy > first_cy + 0.5 {
             let (bg, fg, border) = (Color32::TRANSPARENT, p.fg_muted, p.border);
-            let g = ui.painter().layout_no_wrap(format!("+{}", labels.len() - i), theme::bold(12.0), fg);
+            let g = ui.painter().layout_no_wrap(format!("+{}", labels.len() - i), theme::bold(theme::TEXT_SMALL), fg);
             let size = vec2(g.size().x + 14.0, 20.0);
             let at = place(size, &mut cx, &mut cy);
             items.push(Item { at, size, pill: Some((g, bg, fg, border)) });
@@ -606,13 +604,10 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     // One run when it fits, so it only wraps before a "•" chip. Too wide
     // for that, it wraps at its own spaces instead of inside words.
     let one_run = nb(&meta);
-    let meta = if ui.painter().layout_no_wrap(one_run.clone(), theme::body(12.0), p.fg_muted).size().x <= text_w { one_run } else { meta };
+    let meta = if ui.painter().layout_no_wrap(one_run.clone(), theme::body(theme::TEXT_SMALL), p.fg_muted).size().x <= text_w { one_run } else { meta };
     let mut meta_job = egui::text::LayoutJob::default();
     meta_job.wrap.max_width = text_w;
-    meta_job.append(&meta, 0.0, egui::TextFormat { font_id: theme::body(12.0), color: p.fg_muted, ..Default::default() });
-    if pr.is_draft && pr.state == "OPEN" {
-        meta_job.append(" •\u{a0}Draft", 0.0, egui::TextFormat { font_id: theme::body(12.0), color: p.fg_muted, ..Default::default() });
-    }
+    meta_job.append(&meta, 0.0, egui::TextFormat { font_id: theme::body(theme::TEXT_SMALL), color: p.fg_muted, ..Default::default() });
     // Review state, in words like github.com's list.
     let review = match pr.review_decision.as_deref() {
         _ if pr.state != "OPEN" || pr.is_draft => None,
@@ -622,15 +617,20 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
         _ => None,
     };
     if let Some((text, color)) = review {
-        meta_job.append(&format!(" •\u{a0}{}", text.replace(' ', "\u{a0}")), 0.0, egui::TextFormat { font_id: theme::body(12.0), color, ..Default::default() });
+        meta_job.append(
+            &format!(" •\u{a0}{}", text.replace(' ', "\u{a0}")),
+            0.0,
+            egui::TextFormat { font_id: theme::body(theme::TEXT_SMALL), color, ..Default::default() },
+        );
     }
-    // Merge readiness, e.g. "● Ready to merge", once GitHub has worked it out.
-    if let Some(ms) = row_status(p, pr, detail).filter(|m| m.short != "Checking" && m.short != "Draft") {
+    // Merge readiness, e.g. "● Ready to merge". "Draft" uses the same chip,
+    // and a muted "● Checking" holds the place until GitHub works it out.
+    if let Some(ms) = row_status(p, pr, detail) {
         // No-break spaces: the chip moves to the next line whole.
         meta_job.append(
             &format!(" ●\u{a0}{}", ms.short.replace(' ', "\u{a0}").replace('-', "\u{2011}")),
             0.0,
-            egui::TextFormat { font_id: theme::bold(12.0), color: ms.color, ..Default::default() },
+            egui::TextFormat { font_id: theme::bold(theme::TEXT_SMALL), color: ms.color, ..Default::default() },
         );
     }
     let meta_g = ui.painter().layout_job(meta_job);
@@ -649,7 +649,7 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
 
     let origin = pos2(rect.left() + left, rect.top() + pad);
     let (icon, color, _) = pr_icon(&pr.state, pr.is_draft, p);
-    icons::paint(painter, Rect::from_min_size(pos2(rect.left() + 16.0, origin.y + 2.0), vec2(16.0, 16.0)), icon, color);
+    icons::paint(painter, Rect::from_min_size(pos2(rect.left() + 16.0, origin.y + 2.0), vec2(theme::ICON, theme::ICON)), icon, color);
     let title = if resp.hovered() {
         let mut job = hover_job;
         for s in &mut job.sections {
@@ -666,8 +666,16 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
         let r = Rect::from_min_size(origin + it.at, it.size);
         match it.pill {
             None => {
-                let (icon, color) = status_icon(ci.unwrap_or(""), p);
+                let ci = ci.unwrap_or("");
+                let (icon, color) = status_icon(ci, p);
                 icons::paint(painter, r, icon, color);
+                // CI and merge readiness can disagree (a check that isn't
+                // required failed), so the icon says which it is.
+                let tip = match detail.filter(|d| !d.checks.is_empty()) {
+                    Some(d) => super::checks_tip(&d.checks),
+                    None => super::ci_tip(ci, pr.merge_state_status.as_deref()).to_string(),
+                };
+                super::tip(&ui.interact(r, resp.id.with("ci"), Sense::hover()), &tip);
             }
             Some((g, bg, fg, border)) => {
                 painter.rect(r, CornerRadius::same(255), bg, Stroke::new(1.0, border), StrokeKind::Inside);
@@ -685,8 +693,8 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
     // Top right: author, then comment count, level with the title.
     let slot_left = rect.right() - 16.0 - comment_w;
     if comments > 0 {
-        icons::paint(painter, Rect::from_min_size(pos2(slot_left + 4.0, origin.y + 2.0), vec2(16.0, 16.0)), Icon::Comment, p.fg_muted);
-        let g = painter.layout_no_wrap(comments.to_string(), theme::bold(12.0), p.fg_muted);
+        icons::paint(painter, Rect::from_min_size(pos2(slot_left + 4.0, origin.y + 2.0), vec2(theme::ICON, theme::ICON)), Icon::Comment, p.fg_muted);
+        let g = painter.layout_no_wrap(comments.to_string(), theme::bold(theme::TEXT_SMALL), p.fg_muted);
         painter.galley(pos2(slot_left + 24.0, origin.y + 2.0), g, p.fg_muted);
     }
     // Assignees, like github.com (the author is already in the meta line).

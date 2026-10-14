@@ -52,53 +52,47 @@ pub fn main(app: &mut App, ui: &mut Ui) {
 }
 
 fn header(app: &mut App, ui: &mut Ui, p: &Palette) {
-    egui::Panel::top("header")
-        .exact_size(52.0)
-        .frame(Frame::new().fill(p.header).inner_margin(Margin::symmetric(16, 0)).stroke(Stroke::new(1.0, p.border)))
-        .show(ui, |ui| {
-            ui.horizontal_centered(|ui| {
-                let list_open = if app.narrow { app.list_open_narrow } else { app.panels.list };
-                let (icon, tip) = if list_open {
-                    (Icon::SidebarLeftClose, "Hide pull request list (⌘B)")
-                } else {
-                    (Icon::SidebarLeftOpen, "Show pull request list (⌘B)")
-                };
-                if icon_button(ui, icon, tip, p).clicked() {
-                    app.actions.push(Action::TogglePanel(Panel::List));
+    // No frame stroke: the panel's own separator is the one bottom rule.
+    egui::Panel::top("header").exact_size(theme::HEADER_H).frame(Frame::new().fill(p.header).inner_margin(Margin::symmetric(16, 0))).show(ui, |ui| {
+        ui.horizontal_centered(|ui| {
+            // Item spacing is the one gap between header items.
+            let list_open = if app.narrow { app.list_open_narrow } else { app.panels.list };
+            let (icon, tip) =
+                if list_open { (Icon::SidebarLeftClose, "Hide pull request list (⌘B)") } else { (Icon::SidebarLeftOpen, "Show pull request list (⌘B)") };
+            if icon_button(ui, icon, tip, p).clicked() {
+                app.actions.push(Action::TogglePanel(Panel::List));
+            }
+            icons::show(ui, Icon::PrOpen, 20.0, p.fg);
+            ui.label(RichText::new("Pull requests").font(theme::bold(theme::TEXT_LARGE)).color(p.fg));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if !app.viewer.is_empty() {
+                    let url = format!("https://github.com/{}.png?size=64", app.viewer);
+                    let r = avatar(ui, &url, theme::CONTROL_H);
+                    let r = r.interact(Sense::click()).tip(format!("Signed in as {} ({})", app.viewer, app.auth_source.map(|s| s.describe()).unwrap_or("")));
+                    r.context_menu(|ui| {
+                        if ui.button("Sign out").clicked() {
+                            app.actions.push(Action::SignOut);
+                        }
+                    });
                 }
-                ui.add_space(6.0);
-                icons::show(ui, Icon::PrOpen, 20.0, p.fg);
-                ui.add_space(2.0);
-                ui.label(RichText::new("Pull requests").font(theme::bold(15.0)).color(p.fg));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if !app.viewer.is_empty() {
-                        let url = format!("https://github.com/{}.png?size=64", app.viewer);
-                        let r = avatar(ui, &url, 28.0);
-                        let r =
-                            r.interact(Sense::click()).tip(format!("Signed in as {} ({})", app.viewer, app.auth_source.map(|s| s.describe()).unwrap_or("")));
-                        r.context_menu(|ui| {
-                            if ui.button("Sign out").clicked() {
-                                app.actions.push(Action::SignOut);
-                            }
-                        });
-                    }
-                    ui.add_space(4.0);
-                    if icon_button(ui, Icon::Gear, "Settings", p).clicked() {
-                        app.actions.push(Action::OpenSettings);
-                    }
-                    ui.add_space(4.0);
-                    let loading = app.lists.values().any(|l| l.loading);
-                    if loading {
-                        // Same button frame, with a spinner in it.
-                        let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
-                        ui.painter().rect(rect, 6.0, p.btn_bg, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
-                        egui::Spinner::new().size(16.0).color(p.fg_muted).paint_at(ui, rect.shrink(8.0));
-                    } else if icon_button(ui, Icon::Sync, "Refresh (⌘R)", p).clicked() {
-                        app.actions.push(Action::Refresh);
-                    }
-                });
+                if icon_button(ui, Icon::Gear, "Settings", p).clicked() {
+                    app.actions.push(Action::OpenSettings);
+                }
+                let loading = app.lists.values().any(|l| l.loading);
+                if loading {
+                    // Same button frame, with a spinner in it.
+                    let (rect, _) = ui.allocate_exact_size(vec2(theme::CONTROL_H, theme::CONTROL_H), Sense::hover());
+                    ui.painter().rect(rect, theme::RADIUS, p.btn_bg, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
+                    egui::Spinner::new()
+                        .size(theme::ICON)
+                        .color(p.fg_muted)
+                        .paint_at(ui, Rect::from_center_size(rect.center(), vec2(theme::ICON, theme::ICON)));
+                } else if icon_button(ui, Icon::Sync, "Refresh (⌘R)", p).clicked() {
+                    app.actions.push(Action::Refresh);
+                }
             });
         });
+    });
 }
 
 pub fn sign_in(app: &mut App, ui: &mut Ui) {
@@ -108,34 +102,34 @@ pub fn sign_in(app: &mut App, ui: &mut Ui) {
             ui.add_space((ui.available_height() / 2.0 - 190.0).max(40.0));
             icons::show(ui, Icon::PrOpen, 48.0, p.fg);
             ui.add_space(12.0);
-            ui.label(RichText::new("Sign in to GitHub").font(theme::body(24.0)).color(p.fg));
+            ui.label(RichText::new("Sign in to GitHub").font(theme::body(theme::TEXT_DISPLAY)).color(p.fg));
             ui.add_space(16.0);
             if app.finding_token {
                 ui.add(egui::Spinner::new().size(20.0));
                 ui.label(RichText::new("Looking for your GitHub login…").color(p.fg_muted));
                 return;
             }
-            Frame::new().fill(p.canvas).stroke(Stroke::new(1.0, p.border)).corner_radius(6).inner_margin(Margin::same(16)).show(ui, |ui| {
+            Frame::new().fill(p.canvas).stroke(Stroke::new(1.0, p.border)).corner_radius(theme::RADIUS).inner_margin(Margin::same(16)).show(ui, |ui| {
                 ui.set_width(340.0);
                 ui.vertical(|ui| {
                     if let Some(e) = &app.token_error {
-                        ui.label(RichText::new(e).color(p.closed).size(13.0));
+                        ui.label(RichText::new(e).color(p.closed).size(theme::TEXT_DENSE));
                         ui.add_space(8.0);
                     }
                     ui.label(
                         RichText::new("No gh CLI login or GH_TOKEN was found. Paste a personal access token with the repo and read:org scopes.")
-                            .size(13.0)
+                            .size(theme::TEXT_DENSE)
                             .color(p.fg_muted),
                     );
                     ui.add_space(10.0);
-                    ui.label(RichText::new("Personal access token").font(theme::bold(14.0)));
+                    ui.label(RichText::new("Personal access token").font(theme::bold(theme::TEXT_BODY)));
                     let r = ui.add(egui::TextEdit::singleline(&mut app.token_input).password(true).desired_width(f32::INFINITY).margin(vec2(8.0, 6.0)));
                     if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                         app.actions.push(Action::SubmitToken);
                     }
                     ui.add_space(12.0);
                     let w = ui.available_width();
-                    if ui.add_sized([w, 32.0], primary_button("Sign in", p)).clicked() {
+                    if ui.add_sized([w, theme::CONTROL_H], primary_button("Sign in", p)).clicked() {
                         app.actions.push(Action::SubmitToken);
                     }
                 });
@@ -145,12 +139,12 @@ pub fn sign_in(app: &mut App, ui: &mut Ui) {
                 app.actions.push(Action::FindToken);
             }
             ui.add_space(16.0);
-            Frame::new().stroke(Stroke::new(1.0, p.border)).corner_radius(6).inner_margin(Margin::same(14)).show(ui, |ui| {
+            Frame::new().stroke(Stroke::new(1.0, p.border)).corner_radius(theme::RADIUS).inner_margin(Margin::same(14)).show(ui, |ui| {
                 ui.set_width(340.0);
                 ui.vertical_centered(|ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Need a token?").size(13.0));
-                        if link(ui, "Create one on GitHub.", 13.0, p).clicked() {
+                        ui.label(RichText::new("Need a token?").size(theme::TEXT_DENSE));
+                        if link(ui, "Create one on GitHub.", theme::TEXT_DENSE, p).clicked() {
                             app.actions
                                 .push(Action::OpenUrl("https://github.com/settings/tokens/new?scopes=repo,read:org&description=GitHub%20PRs%20desktop".into()));
                         }
@@ -159,6 +153,95 @@ pub fn sign_in(app: &mut App, ui: &mut Ui) {
             });
         });
     });
+}
+
+// ---------- Dialogs ----------
+
+/// Width of every dialog.
+pub const MODAL_W: f32 = 560.0;
+/// Side padding of every dialog section.
+pub const MODAL_PAD: f32 = 16.0;
+/// ⌘K rows: height, and how far their icon sits in from the highlight's edge.
+const GOTO_ROW_H: f32 = 30.0;
+const GOTO_ROW_INSET: f32 = 10.0;
+/// The ⌘K text box's inner margin. Its text still starts at the box's
+/// left edge, so rows don't add it to their text column.
+const GOTO_TEXT_MARGIN: f32 = 4.0;
+
+/// The one dialog frame: overlay fill, 1px border, overlay radius and
+/// shadow. No padding; content goes in `modal_section`s.
+pub fn modal_frame(p: &Palette) -> Frame {
+    Frame::new().fill(p.overlay).stroke(Stroke::new(1.0, p.border)).corner_radius(theme::RADIUS_OVERLAY).shadow(theme::overlay_shadow(p))
+}
+
+/// A Primer dialog near the top of the window, over a dimmed page. Build it
+/// from `modal_section`s split by `modal_divider`s.
+pub fn modal<R>(ctx: &egui::Context, id: &str, add: impl FnOnce(&mut Ui) -> R) -> egui::ModalResponse<R> {
+    let p = theme::palette(ctx);
+    let id = egui::Id::new(id);
+    let area = egui::Modal::default_area(id).anchor(egui::Align2::CENTER_TOP, vec2(0.0, 96.0));
+    egui::Modal::new(id).area(area).frame(modal_frame(p)).backdrop_color(p.backdrop).show(ctx, |ui| {
+        ui.set_width(MODAL_W);
+        // Sections and dividers butt together; each section pads itself.
+        ui.spacing_mut().item_spacing.y = 0.0;
+        add(ui)
+    })
+}
+
+/// One padded band of a dialog: header, body or footer.
+pub fn modal_section<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let spacing = ui.ctx().global_style().spacing.item_spacing;
+    Frame::new()
+        .inner_margin(Margin::symmetric(MODAL_PAD as i8, 12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing = spacing;
+            add(ui)
+        })
+        .inner
+}
+
+/// A full-width rule between dialog sections.
+pub fn modal_divider(ui: &mut Ui, p: &Palette) {
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
+    ui.painter().hline(r.x_range(), r.center().y, Stroke::new(1.0, p.border_muted));
+}
+
+/// The ⌘K highlight: hover fill plus an accent bar, inset so the bar
+/// stays clear of the fill's rounded corner.
+fn goto_highlight(painter: &egui::Painter, r: Rect, p: &Palette) {
+    painter.rect_filled(r, theme::RADIUS, p.hover_row);
+    painter.rect_filled(Rect::from_min_size(r.min + vec2(0.0, 5.0), vec2(2.0, r.height() - 10.0)), 1.0, p.accent_emphasis);
+}
+
+/// A small key cap, like `Esc` or `⌘K`, with its right edge at
+/// `right_center`. `"↵"` is drawn as an arrow, since system fonts lack the
+/// glyph. Returns where it was drawn.
+pub fn key_cap(painter: &egui::Painter, right_center: egui::Pos2, key: &str, p: &Palette) -> Rect {
+    let enter = key == "↵";
+    let g = painter.layout_no_wrap(if enter { String::new() } else { key.to_string() }, theme::body(theme::TEXT_SMALL), p.fg_muted);
+    let size = vec2((g.size().x + 10.0).max(22.0), 20.0);
+    let r = Rect::from_min_size(pos2(right_center.x - size.x, right_center.y - size.y / 2.0), size);
+    painter.rect(r, theme::RADIUS_SMALL, p.canvas_subtle, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
+    if enter {
+        // Down from the top right, then left, with an arrowhead.
+        let c = r.center();
+        let s = Stroke::new(1.25, p.fg_muted);
+        let (top, corner, tip) = (pos2(c.x + 4.0, c.y - 4.0), pos2(c.x + 4.0, c.y + 2.0), pos2(c.x - 4.0, c.y + 2.0));
+        painter.add(egui::Shape::line(vec![top, corner, tip], s));
+        painter.add(egui::Shape::line(vec![tip + vec2(3.0, -3.0), tip, tip + vec2(3.0, 3.0)], s));
+    } else {
+        painter.galley(r.center() - g.size() / 2.0, g, p.fg_muted);
+    }
+    r
+}
+
+/// A path with the home folder shown as `~`.
+fn tilde(path: &std::path::Path) -> String {
+    match dirs::home_dir().and_then(|h| path.strip_prefix(h).ok().map(|rest| rest.to_path_buf())) {
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
 }
 
 /// One ⌘K result: a PR already loaded, or a ref to fetch from GitHub.
@@ -235,52 +318,52 @@ pub fn settings_box(app: &mut App, ctx: &egui::Context) {
     }
 
     let p = theme::palette(ctx);
-    let id = egui::Id::new("settings");
-    let area = egui::Modal::default_area(id).anchor(egui::Align2::CENTER_TOP, vec2(0.0, 96.0));
-    let frame = Frame::new().fill(p.overlay).stroke(Stroke::new(1.0, p.border)).corner_radius(12).inner_margin(Margin::same(20)).shadow(egui::Shadow {
-        offset: [0, 12],
-        blur: 48,
-        spread: 0,
-        color: Color32::from_black_alpha(if p.dark { 180 } else { 70 }),
-    });
     let mut changes = Vec::new();
     let mut done = false;
-    let resp = egui::Modal::new(id).area(area).frame(frame).backdrop_color(p.backdrop).show(ctx, |ui| {
-        ui.set_width(460.0);
-        ui.label(RichText::new("Settings").font(theme::bold(18.0)).color(p.fg));
-        ui.add_space(12.0);
-        ui.label(RichText::new("Ignored repositories").font(theme::bold(14.0)).color(p.fg));
-        ui.label(RichText::new("Pull requests from checked owners and repos are left out of every list.").size(13.0).color(p.fg_muted));
-        ui.add_space(8.0);
-        let max_h = (ctx.content_rect().height() - 340.0).max(160.0);
-        egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
-            for (owner, repos) in &owners {
-                let mut on = app.settings.is_ignored(owner);
-                if ui.checkbox(&mut on, RichText::new(owner).font(theme::bold(13.0)).color(p.fg)).changed() {
-                    changes.push((owner.clone(), on));
-                }
-                let owner_on = on;
-                for repo in repos {
-                    ui.horizontal(|ui| {
-                        ui.add_space(24.0);
-                        let name = repo.split_once('/').map_or(repo.as_str(), |(_, n)| n);
-                        // A whole owner ignored covers its repos.
-                        let mut on = owner_on || app.settings.is_ignored(repo);
-                        let resp = ui.add_enabled(!owner_on, egui::Checkbox::new(&mut on, RichText::new(name).size(13.0).color(p.fg)));
-                        if resp.changed() {
-                            changes.push((repo.clone(), on));
-                        }
-                    });
-                }
-            }
+    let resp = modal(ctx, "settings", |ui| {
+        modal_section(ui, |ui| {
+            ui.label(RichText::new("Settings").font(theme::bold(theme::TEXT_TITLE)).color(p.fg));
         });
-        ui.add_space(12.0);
-        ui.horizontal(|ui| {
-            if let Some(path) = crate::settings::path() {
-                ui.label(RichText::new(format!("Saved in {}", path.display())).size(11.0).color(p.fg_muted));
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                done = ui.add(button("Done", p)).clicked();
+        modal_divider(ui, p);
+        modal_section(ui, |ui| {
+            ui.label(RichText::new("Hidden owners and repos").font(theme::bold(theme::TEXT_BODY)).color(p.fg));
+            ui.label(RichText::new("Pull requests from checked owners and repos are left out of every list.").size(theme::TEXT_DENSE).color(p.fg_muted));
+            let max_h = (ctx.content_rect().height() - 340.0).max(160.0);
+            egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
+                // Rows are control height already; no gap between them.
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (owner, repos) in &owners {
+                    let mut on = app.settings.is_ignored(owner);
+                    if checkbox(ui, &mut on, RichText::new(owner).font(theme::bold(theme::TEXT_DENSE)).color(p.fg), p).changed() {
+                        changes.push((owner.clone(), on));
+                    }
+                    let owner_on = on;
+                    for repo in repos {
+                        ui.horizontal(|ui| {
+                            // Repo boxes line up under the owner's name.
+                            ui.add_space(theme::CHECK_BOX);
+                            let name = repo.split_once('/').map_or(repo.as_str(), |(_, n)| n);
+                            // A whole owner ignored covers its repos.
+                            let mut on = owner_on || app.settings.is_ignored(repo);
+                            let resp =
+                                ui.add_enabled_ui(!owner_on, |ui| checkbox(ui, &mut on, RichText::new(name).size(theme::TEXT_DENSE).color(p.fg), p)).inner;
+                            if resp.changed() {
+                                changes.push((repo.clone(), on));
+                            }
+                        });
+                    }
+                }
+            });
+        });
+        modal_divider(ui, p);
+        modal_section(ui, |ui| {
+            ui.horizontal(|ui| {
+                if let Some(path) = crate::settings::path() {
+                    ui.label(RichText::new(format!("Saved in {}", tilde(&path))).size(theme::TEXT_SMALL).color(p.fg_muted));
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    done = ui.add(primary_button("Done", p)).clicked();
+                });
             });
         });
     });
@@ -360,26 +443,17 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
     }
     g.sel = results.get(sel).map(GoResult::key);
     let p = theme::palette(ctx);
-    let id = egui::Id::new("goto");
-    let area = egui::Modal::default_area(id).anchor(egui::Align2::CENTER_TOP, vec2(0.0, 96.0));
-    let frame = Frame::new().fill(p.overlay).stroke(Stroke::new(1.0, p.border)).corner_radius(12).inner_margin(Margin::same(0)).shadow(egui::Shadow {
-        offset: [0, 12],
-        blur: 48,
-        spread: 0,
-        color: Color32::from_black_alpha(if p.dark { 180 } else { 70 }),
-    });
-    let resp = egui::Modal::new(id).area(area).frame(frame).backdrop_color(p.backdrop).show(ctx, |ui| {
-        ui.set_width(560.0);
-        Frame::new().inner_margin(Margin::symmetric(16, 14)).show(ui, |ui| {
+    let resp = modal(ctx, "goto", |ui| {
+        modal_section(ui, |ui| {
             ui.horizontal(|ui| {
-                icons::show(ui, Icon::PrOpen, 16.0, p.fg_muted);
+                icons::show(ui, Icon::PrOpen, theme::ICON, p.fg_muted);
                 let before = g.text.clone();
                 let edit = ui.add(
                     egui::TextEdit::singleline(&mut g.text)
                         .frame(Frame::NONE)
-                        .font(theme::body(16.0))
+                        .font(theme::body(theme::TEXT_LARGE))
                         .hint_text("Go to pull request: 123, owner/repo#123, or a link")
-                        .margin(vec2(4.0, 2.0))
+                        .margin(vec2(GOTO_TEXT_MARGIN, 2.0))
                         .desired_width(f32::INFINITY),
                 );
                 if !edit.has_focus() && !g.loading {
@@ -402,82 +476,100 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
                 }
             });
         });
-        ui.painter().hline(ui.min_rect().x_range(), ui.cursor().top(), Stroke::new(1.0, p.border_muted));
-        Frame::new().inner_margin(Margin::symmetric(16, 10)).show(ui, |ui| {
+        modal_divider(ui, p);
+        // Rows sit GOTO_ROW_INSET outside the dialog's padding, so their icon
+        // and text land on the input's icon and text columns.
+        Frame::new().inner_margin(Margin::same((MODAL_PAD - GOTO_ROW_INSET) as i8)).show(ui, |ui| {
             ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let text_x = GOTO_ROW_INSET + theme::ICON + ui.spacing().item_spacing.x;
+            let icon_at = |r: Rect| Rect::from_min_size(pos2(r.left() + GOTO_ROW_INSET, r.center().y - theme::ICON / 2.0), vec2(theme::ICON, theme::ICON));
+            // Loading, error and hint lines use the same row and columns.
+            let note = |ui: &mut Ui, spinner: bool, icon: Option<(Icon, Color32)>, text: &str, color: Color32| {
+                let w = ui.available_width();
+                let g = ui.painter().layout(text.to_string(), theme::body(theme::TEXT_DENSE), color, w - text_x - GOTO_ROW_INSET);
+                // A long error wraps; the row grows to fit it.
+                let h = GOTO_ROW_H.max(g.size().y + GOTO_ROW_H - theme::ICON);
+                let (r, _) = ui.allocate_exact_size(vec2(w, h), Sense::hover());
+                if spinner {
+                    egui::Spinner::new().size(theme::ICON).color(p.fg_muted).paint_at(ui, icon_at(r));
+                }
+                if let Some((icon, c)) = icon {
+                    icons::paint(ui.painter(), icon_at(r), icon, c);
+                }
+                ui.painter().galley(pos2(r.left() + text_x, r.center().y - g.size().y / 2.0), g, color);
+            };
             if g.loading {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(RichText::new("Opening…").color(p.fg_muted).size(13.0));
-                });
+                note(ui, true, None, "Opening…", p.fg_muted);
             } else if let Some(e) = &g.error {
-                ui.horizontal(|ui| {
-                    icons::show(ui, Icon::X, 14.0, p.closed);
-                    ui.label(RichText::new(e).color(p.closed).size(13.0));
-                });
+                note(ui, false, Some((Icon::X, p.closed)), e, p.closed);
             } else if !results.is_empty() {
-                ui.vertical(|ui| {
-                    for (i, res) in results.iter().enumerate() {
-                        let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
-                        // Hover moves the highlight, but only when the mouse
-                        // moves, so a resting pointer doesn't fight the keys.
-                        if resp.hovered() && ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO) && i != sel {
-                            g.sel = Some(res.key());
-                            ui.ctx().request_repaint();
+                for (i, res) in results.iter().enumerate() {
+                    let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), GOTO_ROW_H), Sense::click());
+                    // Hover moves the highlight, but only when the mouse
+                    // moves, so a resting pointer doesn't fight the keys.
+                    if resp.hovered() && ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO) && i != sel {
+                        g.sel = Some(res.key());
+                        ui.ctx().request_repaint();
+                    }
+                    let on = i == sel;
+                    if on {
+                        goto_highlight(ui.painter(), r, p);
+                    }
+                    let mut job = egui::text::LayoutJob::default();
+                    let muted = |c| egui::TextFormat { font_id: theme::body(theme::TEXT_DENSE), color: c, ..Default::default() };
+                    let (icon, color) = match res {
+                        GoResult::Pr(pr) => {
+                            job.append(&format!("{}#{} ", pr.repository.name_with_owner, pr.number), 0.0, muted(p.fg_muted));
+                            append_title(&mut job, &pr.title, theme::TEXT_DENSE, true, 0.0, p);
+                            let (icon, color, _) = pr_icon(&pr.state, pr.is_draft, p);
+                            (icon, color)
                         }
-                        let on = i == sel;
-                        if on {
-                            ui.painter().rect_filled(r, 6.0, p.hover_row);
-                            ui.painter().rect_filled(Rect::from_min_size(r.min + vec2(0.0, 5.0), vec2(2.0, 20.0)), 1.0, p.accent_emphasis);
+                        GoResult::Ref(repo, n) => {
+                            job.append(
+                                &format!("{repo}#{n}"),
+                                0.0,
+                                egui::TextFormat { font_id: theme::bold(theme::TEXT_DENSE), color: p.fg, ..Default::default() },
+                            );
+                            job.append("Load pull request", 8.0, muted(p.fg_muted));
+                            (Icon::PrOpen, p.fg_muted)
                         }
-                        let mut job = egui::text::LayoutJob::default();
-                        let muted = |c| egui::TextFormat { font_id: theme::body(13.0), color: c, ..Default::default() };
-                        let (icon, color) = match res {
-                            GoResult::Pr(pr) => {
-                                job.append(&format!("{}#{} ", pr.repository.name_with_owner, pr.number), 0.0, muted(p.fg_muted));
-                                append_title(&mut job, &pr.title, 13.0, true, 0.0, p);
-                                let (icon, color, _) = pr_icon(&pr.state, pr.is_draft, p);
-                                (icon, color)
-                            }
-                            GoResult::Ref(repo, n) => {
-                                job.append(&format!("{repo}#{n}"), 0.0, egui::TextFormat { font_id: theme::bold(13.0), color: p.fg, ..Default::default() });
-                                job.append("Open from GitHub", 8.0, muted(p.fg_muted));
-                                (Icon::PrOpen, p.fg_muted)
-                            }
-                        };
-                        icons::paint(ui.painter(), Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - 7.0), vec2(14.0, 14.0)), icon, color);
-                        // The highlighted row gets the Enter hint.
-                        let hint_w = if on { ui.painter().layout_no_wrap("Enter to open".into(), theme::body(12.0), p.fg_muted).size().x + 16.0 } else { 0.0 };
-                        let (tg, _) = cut_job(ui.painter(), job, r.width() - 44.0 - hint_w);
-                        ui.painter().galley(pos2(r.left() + 32.0, r.center().y - tg.size().y / 2.0), tg, p.fg);
-                        if on {
-                            ui.painter().text(pos2(r.right() - 8.0, r.center().y), egui::Align2::RIGHT_CENTER, "Enter to open", theme::body(12.0), p.fg_muted);
-                        }
-                        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                            match res {
-                                GoResult::Pr(pr) => picked = Some(pr.clone()),
-                                GoResult::Ref(..) => {
-                                    g.sel = Some(res.key());
-                                    submit = true;
-                                }
+                    };
+                    icons::paint(ui.painter(), icon_at(r), icon, color);
+                    // The highlighted row gets the Enter key cap.
+                    let hint_w = if on { key_cap(ui.painter(), pos2(r.right() - GOTO_ROW_INSET, r.center().y), "↵", p).width() + 16.0 } else { 0.0 };
+                    let (tg, _) = cut_job(ui.painter(), job, r.width() - text_x - GOTO_ROW_INSET - hint_w);
+                    ui.painter().galley(pos2(r.left() + text_x, r.center().y - tg.size().y / 2.0), tg, p.fg);
+                    if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+                        match res {
+                            GoResult::Pr(pr) => picked = Some(pr.clone()),
+                            GoResult::Ref(..) => {
+                                g.sel = Some(res.key());
+                                submit = true;
                             }
                         }
                     }
-                });
+                }
             } else if !g.text.trim().is_empty() {
                 // Nothing loaded matches: offer GitHub's search for it.
-                let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 30.0), Sense::click());
+                let (r, resp) = ui.allocate_exact_size(vec2(ui.available_width(), GOTO_ROW_H), Sense::click());
                 resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Search pull requests"));
-                ui.painter().rect_filled(r, 6.0, p.hover_row);
-                ui.painter().rect_filled(Rect::from_min_size(r.min + vec2(0.0, 5.0), vec2(2.0, 20.0)), 1.0, p.accent_emphasis);
-                icons::paint(ui.painter(), Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - 7.0), vec2(14.0, 14.0)), Icon::Search, p.fg_muted);
+                goto_highlight(ui.painter(), r, p);
+                icons::paint(ui.painter(), icon_at(r), Icon::Search, p.fg_muted);
+                let hint_w = key_cap(ui.painter(), pos2(r.right() - GOTO_ROW_INSET, r.center().y), "↵", p).width() + 16.0;
                 let mut job = egui::text::LayoutJob::default();
-                job.append("Search pull requests for ", 0.0, egui::TextFormat { font_id: theme::body(13.0), color: p.fg_muted, ..Default::default() });
-                job.append(&format!("\"{}\"", g.text.trim()), 0.0, egui::TextFormat { font_id: theme::bold(13.0), color: p.fg, ..Default::default() });
-                job.wrap = egui::text::TextWrapping::truncate_at_width(r.width() - 44.0 - 110.0);
-                let tg = ui.painter().layout_job(job);
-                ui.painter().galley(pos2(r.left() + 32.0, r.center().y - tg.size().y / 2.0), tg, p.fg);
-                ui.painter().text(pos2(r.right() - 8.0, r.center().y), egui::Align2::RIGHT_CENTER, "Enter to search", theme::body(12.0), p.fg_muted);
+                job.append(
+                    "Search pull requests for ",
+                    0.0,
+                    egui::TextFormat { font_id: theme::body(theme::TEXT_DENSE), color: p.fg_muted, ..Default::default() },
+                );
+                job.append(
+                    &format!("\"{}\"", g.text.trim()),
+                    0.0,
+                    egui::TextFormat { font_id: theme::bold(theme::TEXT_DENSE), color: p.fg, ..Default::default() },
+                );
+                let (tg, _) = cut_job(ui.painter(), job, r.width() - text_x - GOTO_ROW_INSET - hint_w);
+                ui.painter().galley(pos2(r.left() + text_x, r.center().y - tg.size().y / 2.0), tg, p.fg);
                 if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     search_for = Some(g.text.trim().to_string());
                 }
@@ -486,7 +578,7 @@ pub fn goto_box(app: &mut App, ctx: &egui::Context) {
                     Some(r) => format!("A bare number opens a PR in {r}. Esc to close."),
                     None => "Include the repo, like owner/repo#123. Esc to close.".to_string(),
                 };
-                ui.label(RichText::new(hint).color(p.fg_muted).size(13.0));
+                note(ui, false, None, &hint, p.fg_muted);
             }
         });
     });
@@ -580,23 +672,26 @@ pub fn friendly_error(raw: &str) -> &'static str {
 /// Primer's red flash banner with a Retry button. Returns true on Retry.
 pub fn error_banner(ui: &mut Ui, p: &Palette, title: &str, raw: &str) -> bool {
     let mut retry = false;
-    Frame::new().fill(p.danger_subtle).stroke(Stroke::new(1.0, p.danger_border)).corner_radius(6).inner_margin(Margin::symmetric(16, 12)).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            icons::show(ui, Icon::X, 16.0, p.closed);
-            // The text wraps in what's left beside Retry.
-            let text_w = (ui.available_width() - 80.0).max(80.0);
-            ui.allocate_ui_with_layout(vec2(text_w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui.set_width(text_w);
-                ui.spacing_mut().item_spacing.y = 2.0;
-                ui.label(RichText::new(title).font(theme::bold(14.0)).color(p.fg));
-                ui.label(RichText::new(friendly_error(raw)).size(13.0).color(p.fg_muted)).tip(raw);
+    Frame::new().fill(p.danger_subtle).stroke(Stroke::new(1.0, p.danger_border)).corner_radius(theme::RADIUS).inner_margin(Margin::symmetric(16, 12)).show(
+        ui,
+        |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                icons::show(ui, Icon::X, 16.0, p.closed);
+                // The text wraps in what's left beside Retry.
+                let text_w = (ui.available_width() - 80.0).max(80.0);
+                ui.allocate_ui_with_layout(vec2(text_w, 0.0), egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.set_width(text_w);
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    ui.label(RichText::new(title).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
+                    ui.label(RichText::new(friendly_error(raw)).size(theme::TEXT_DENSE).color(p.fg_muted)).tip(raw);
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    retry = ui.add(button("Retry", p)).clicked();
+                });
             });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                retry = ui.add(button("Retry", p)).clicked();
-            });
-        });
-    });
+        },
+    );
     retry
 }
 
@@ -610,12 +705,12 @@ pub fn stale_note(ctx: &egui::Context, id: &str, raw: &str) -> bool {
         .anchor(if id == "list" { egui::Align2::LEFT_BOTTOM } else { egui::Align2::RIGHT_BOTTOM }, vec2(if id == "list" { 16.0 } else { -16.0 }, -16.0))
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-            Frame::new().fill(p.canvas).stroke(Stroke::new(1.0, p.border)).corner_radius(6).inner_margin(Margin::symmetric(12, 6)).show(ui, |ui| {
+            Frame::new().fill(p.canvas).stroke(Stroke::new(1.0, p.border)).corner_radius(theme::RADIUS).inner_margin(Margin::symmetric(12, 6)).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     icons::show(ui, Icon::Sync, 14.0, p.attention);
-                    ui.label(RichText::new("Couldn't refresh · showing saved data").size(12.0).color(p.fg_muted))
+                    ui.label(RichText::new("Couldn't refresh · showing saved data").size(theme::TEXT_SMALL).color(p.fg_muted))
                         .tip(format!("{}\n{raw}", friendly_error(raw)));
-                    retry = link(ui, "Retry", 12.0, p).clicked();
+                    retry = link(ui, "Retry", theme::TEXT_SMALL, p).clicked();
                 });
             });
         });
@@ -634,15 +729,14 @@ pub fn toast(app: &mut App, ctx: &egui::Context) {
         // Primer toast: dark in both themes, colored icon, white text.
         Frame::new()
             .fill(p.tooltip)
-            .corner_radius(6)
+            .corner_radius(theme::RADIUS)
             .inner_margin(Margin::symmetric(14, 10))
             .shadow(egui::Shadow { offset: [0, 4], blur: 12, spread: 0, color: Color32::from_black_alpha(60) })
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let (icon, color) =
-                        if t.error { (Icon::X, Color32::from_rgb(0xff, 0x81, 0x82)) } else { (Icon::Check, Color32::from_rgb(0x4a, 0xc2, 0x6b)) };
-                    icons::show(ui, icon, 16.0, color);
-                    ui.label(RichText::new(&t.text).color(Color32::WHITE).size(14.0));
+                    let (icon, color) = if t.error { (Icon::X, p.tooltip_danger) } else { (Icon::Check, p.tooltip_success) };
+                    icons::show(ui, icon, theme::ICON, color);
+                    ui.label(RichText::new(&t.text).color(p.tooltip_fg).size(theme::TEXT_BODY));
                 });
             });
     });
@@ -721,18 +815,44 @@ pub fn pill(ui: &mut Ui, text: &str, font: egui::FontId, bg: Color32, fg: Color3
 pub fn label_pill(ui: &mut Ui, name: &str, color: &str) {
     let p = theme::palette(ui.ctx());
     let (bg, fg, border) = theme::label_colors(color, p);
-    pill(ui, name, theme::bold(12.0), bg, fg, border);
+    pill(ui, name, theme::bold(theme::TEXT_SMALL), bg, fg, border);
 }
 
 pub fn primary_button(text: &str, p: &Palette) -> egui::Button<'static> {
-    egui::Button::new(RichText::new(text).font(theme::bold(14.0)).color(Color32::WHITE))
+    egui::Button::new(RichText::new(text).font(theme::bold(theme::TEXT_BODY)).color(p.fg_on_emphasis))
         .fill(p.btn_primary)
         .stroke(Stroke::new(1.0, p.btn_primary.gamma_multiply(0.85)))
-        .corner_radius(6)
+        .corner_radius(theme::RADIUS)
+        .min_size(vec2(0.0, theme::CONTROL_H))
+}
+
+/// A primary button that may be disabled. Use this, not
+/// `ui.add_enabled(.., primary_button(..))`: egui's disabled fade turns
+/// green pale on white and barely changes it on black. This draws one
+/// muted look, the same in both themes.
+pub fn primary_action(ui: &mut Ui, text: &str, enabled: bool, p: &Palette) -> egui::Response {
+    if enabled {
+        return ui.add(primary_button(text, p));
+    }
+    let b = egui::Button::new(RichText::new(text).font(theme::bold(theme::TEXT_BODY)).color(p.fg_disabled))
+        .fill(p.btn_disabled)
+        .stroke(Stroke::new(1.0, p.border_muted))
+        .corner_radius(theme::RADIUS)
+        .min_size(vec2(0.0, theme::CONTROL_H));
+    // Still disabled for clicks and screen readers, just not faded.
+    ui.add_enabled_ui(false, |ui| {
+        ui.set_opacity(1.0);
+        ui.add(b)
+    })
+    .inner
 }
 
 pub fn button(text: &str, p: &Palette) -> egui::Button<'static> {
-    egui::Button::new(RichText::new(text).font(theme::bold(14.0)).color(p.fg)).fill(p.btn_bg).stroke(Stroke::new(1.0, p.border)).corner_radius(6)
+    egui::Button::new(RichText::new(text).font(theme::bold(theme::TEXT_BODY)).color(p.fg))
+        .fill(p.btn_bg)
+        .stroke(Stroke::new(1.0, p.border))
+        .corner_radius(theme::RADIUS)
+        .min_size(vec2(0.0, theme::CONTROL_H))
 }
 
 /// `.tip("…")` on any response: a Primer tooltip instead of egui's.
@@ -768,6 +888,9 @@ enum Side {
     Below,
 }
 
+/// Widest a tooltip gets before it wraps.
+const TIP_MAX_W: f32 = 320.0;
+
 /// Primer's tooltip: dark, small white text, beside the widget instead of
 /// under the pointer.
 pub fn tip(resp: &egui::Response, text: &str) {
@@ -792,23 +915,29 @@ fn tip_at(resp: &egui::Response, text: &str, side: Side) {
     let p = theme::palette(&resp.ctx);
     let r = resp.rect;
     let screen = resp.ctx.content_rect();
+    const GAP: f32 = 6.0;
+    // Below a header button means below the header's rule, not across it.
+    let header_bottom = screen.top() + theme::HEADER_H;
+    let below = if r.bottom() <= header_bottom { header_bottom + GAP } else { r.bottom() + GAP };
+    // Its real width, so a centered tip near the right edge is still centered.
+    let half_w = resp.ctx.debug_painter().layout(text.to_string(), theme::body(theme::TEXT_SMALL), p.tooltip_fg, TIP_MAX_W).size().x / 2.0 + 8.0;
     // To the right if there's room, else below; near the right edge, below
     // and right-aligned so it stays inside the window.
     let (pos, pivot) = if side == Side::Above && r.top() > screen.top() + 40.0 {
-        (egui::pos2(r.left(), r.top() - 6.0), egui::Align2::LEFT_BOTTOM)
+        (egui::pos2(r.left(), r.top() - GAP), egui::Align2::LEFT_BOTTOM)
     } else if side == Side::Below {
-        (egui::pos2(r.left(), r.bottom() + 6.0), egui::Align2::LEFT_TOP)
-    } else if r.right() + 340.0 < screen.right() {
-        (egui::pos2(r.right() + 6.0, r.center().y), egui::Align2::LEFT_CENTER)
-    } else if r.center().x + 170.0 < screen.right() {
-        (egui::pos2(r.center().x, r.bottom() + 6.0), egui::Align2::CENTER_TOP)
+        (egui::pos2(r.left(), below), egui::Align2::LEFT_TOP)
+    } else if r.right() + TIP_MAX_W + 20.0 < screen.right() {
+        (egui::pos2(r.right() + GAP, r.center().y), egui::Align2::LEFT_CENTER)
+    } else if r.center().x + half_w + GAP < screen.right() {
+        (egui::pos2(r.center().x, below), egui::Align2::CENTER_TOP)
     } else {
-        (egui::pos2(r.right(), r.bottom() + 6.0), egui::Align2::RIGHT_TOP)
+        (egui::pos2(r.right(), below), egui::Align2::RIGHT_TOP)
     };
     egui::Area::new(resp.id.with("tip")).order(egui::Order::Tooltip).fixed_pos(pos).pivot(pivot).interactable(false).show(&resp.ctx, |ui| {
-        Frame::new().fill(p.tooltip).corner_radius(4).inner_margin(Margin::symmetric(8, 4)).show(ui, |ui| {
-            ui.set_max_width(320.0);
-            ui.label(RichText::new(text).size(12.0).color(Color32::WHITE));
+        Frame::new().fill(p.tooltip).corner_radius(theme::RADIUS).inner_margin(Margin::symmetric(8, 4)).show(ui, |ui| {
+            ui.set_max_width(TIP_MAX_W);
+            ui.label(RichText::new(text).size(theme::TEXT_SMALL).color(p.tooltip_fg));
         });
     });
 }
@@ -825,25 +954,38 @@ pub fn icon_button_tip_above(ui: &mut Ui, icon: Icon, label: &str, p: &Palette) 
 }
 
 fn icon_button_at(ui: &mut Ui, icon: Icon, label: &str, p: &Palette, above: bool) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(theme::CONTROL_H, theme::CONTROL_H), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
     tip_at(&resp, label, if above { Side::Above } else { Side::Auto });
-    let bg = if resp.hovered() { ui.visuals().widgets.hovered.weak_bg_fill } else { p.btn_bg };
-    ui.painter().rect(rect, 6.0, bg, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
-    icons::paint(ui.painter(), rect.shrink(8.0), icon, p.fg_muted);
+    ui.painter().rect(rect, theme::RADIUS, button_fill(&resp, p.btn_bg, p), Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
+    icons::paint(ui.painter(), icon_rect(rect), icon, p.fg_muted);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
 /// An icon button with no frame until hovered, like GitHub's "⋯".
 pub fn icon_button_plain(ui: &mut Ui, icon: Icon, label: &str, p: &Palette) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(theme::CONTROL_H, theme::CONTROL_H), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label));
     tip(&resp, label);
-    if resp.hovered() {
-        ui.painter().rect_filled(rect, 6.0, p.hover_row);
-    }
-    icons::paint(ui.painter(), rect.shrink(8.0), icon, p.fg_muted);
+    ui.painter().rect_filled(rect, theme::RADIUS, button_fill(&resp, Color32::TRANSPARENT, p));
+    icons::paint(ui.painter(), icon_rect(rect), icon, p.fg_muted);
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// A button's fill: `rest`, then the shared hover and pressed fills.
+pub fn button_fill(resp: &egui::Response, rest: Color32, p: &Palette) -> Color32 {
+    if resp.is_pointer_button_down_on() {
+        p.btn_active
+    } else if resp.hovered() {
+        p.btn_hover
+    } else {
+        rest
+    }
+}
+
+/// The icon square centered in a control.
+pub fn icon_rect(control: Rect) -> Rect {
+    Rect::from_center_size(control.center(), vec2(theme::ICON, theme::ICON))
 }
 
 /// Blue text that underlines on hover, like links on github.com.
@@ -870,14 +1012,18 @@ pub fn boxed<R>(ui: &mut Ui, header_fill: Color32, border: Color32, header: impl
     Frame::new()
         .fill(fill)
         .stroke(Stroke::new(1.0, border))
-        .corner_radius(6)
+        .corner_radius(theme::RADIUS)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            Frame::new().fill(header_fill).corner_radius(CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 }).inner_margin(Margin::symmetric(16, 8)).show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.spacing_mut().item_spacing.y = 6.0;
-                header(ui);
-            });
+            Frame::new()
+                .fill(header_fill)
+                .corner_radius(CornerRadius { nw: theme::RADIUS, ne: theme::RADIUS, sw: 0, se: 0 })
+                .inner_margin(Margin::symmetric(16, 8))
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.spacing_mut().item_spacing.y = 6.0;
+                    header(ui);
+                });
             let r = ui.available_rect_before_wrap();
             ui.painter().line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, border));
             Frame::new()
@@ -897,7 +1043,7 @@ pub fn plain_box<R>(ui: &mut Ui, body: impl FnOnce(&mut Ui) -> R) -> R {
     let p = theme::palette(ui.ctx());
     Frame::new()
         .stroke(Stroke::new(1.0, p.border))
-        .corner_radius(6)
+        .corner_radius(theme::RADIUS)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -912,6 +1058,85 @@ pub fn row_separator(ui: &mut Ui) {
     ui.painter().line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, p.border_muted));
 }
 
+/// Primer's checkbox: a small square with a 1px border, accent fill and a
+/// white check when on. The whole row, at control height, is the target.
+pub fn checkbox(ui: &mut Ui, on: &mut bool, text: RichText, p: &Palette) -> egui::Response {
+    let galley = egui::WidgetText::from(text).into_galley(ui, Some(egui::TextWrapMode::Truncate), ui.available_width(), egui::TextStyle::Body);
+    let (rect, mut resp) = ui.allocate_exact_size(vec2(ui.available_width(), theme::CONTROL_H), Sense::click());
+    if resp.clicked() {
+        *on = !*on;
+        resp.mark_changed();
+    }
+    let label = galley.text().to_string();
+    let checked = *on;
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), checked, &label));
+    let b = Rect::from_min_size(pos2(rect.left(), rect.center().y - theme::CHECK_BOX / 2.0), vec2(theme::CHECK_BOX, theme::CHECK_BOX));
+    paint_checkbox(ui.painter(), b, *on, resp.hovered(), p);
+    let x = b.right() + ui.spacing().item_spacing.x;
+    ui.painter().galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, p.fg);
+    resp.on_hover_cursor(egui::CursorIcon::PointingHand)
+}
+
+/// Just the checkbox square, for widgets that paint their own row (the
+/// diff's "Viewed" button). `b` is the box, `theme::CHECK_BOX` square.
+pub fn paint_checkbox(painter: &egui::Painter, b: Rect, on: bool, hovered: bool, p: &Palette) {
+    if on {
+        painter.rect_filled(b, theme::RADIUS_SMALL, p.accent_emphasis);
+        icons::paint(painter, b.shrink(1.5), Icon::Check, p.fg_on_emphasis);
+    } else {
+        let border = if hovered { p.fg_muted } else { p.border_emphasis };
+        painter.rect(b, theme::RADIUS_SMALL, p.canvas, Stroke::new(1.0, border), egui::StrokeKind::Inside);
+    }
+}
+
+/// A one-line search or filter box at control height: search icon, text,
+/// and a × when `clearable`. Returns the text box's response, and whether
+/// the × was clicked (the caller decides what clearing means).
+pub fn search_input(ui: &mut Ui, id: egui::Id, text: &mut String, hint: &str, clearable: bool, clear_label: &str, p: &Palette) -> (egui::Response, bool) {
+    let focused = ui.memory(|m| m.has_focus(id));
+    let (rect, frame) = ui.allocate_exact_size(vec2(ui.available_width(), theme::CONTROL_H), Sense::click());
+    let stroke = if focused {
+        Stroke::new(2.0, p.accent_emphasis)
+    } else if frame.hovered() || ui.rect_contains_pointer(rect) {
+        Stroke::new(1.0, p.border_emphasis)
+    } else {
+        Stroke::new(1.0, p.border)
+    };
+    ui.painter().rect(rect, theme::RADIUS, p.canvas, stroke, egui::StrokeKind::Inside);
+    if frame.clicked() {
+        ui.memory_mut(|m| m.request_focus(id));
+    }
+    let inner = rect.shrink2(vec2(8.0, 0.0));
+    let mut cleared = false;
+    let resp = ui
+        .scope_builder(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+            icons::show(ui, Icon::Search, theme::ICON, p.fg_muted);
+            // The × is a square a bit smaller than the box, easy to hit.
+            let x_size = theme::CONTROL_H - 6.0;
+            let x_w = if clearable { x_size + ui.spacing().item_spacing.x } else { 0.0 };
+            let resp = ui.add(
+                egui::TextEdit::singleline(text)
+                    .id(id)
+                    .hint_text(RichText::new(hint).color(p.fg_muted))
+                    .frame(Frame::NONE)
+                    .font(theme::body(theme::TEXT_BODY))
+                    .margin(vec2(4.0, 0.0))
+                    // Exactly what's left, so the box never grows to fit.
+                    .desired_width((ui.available_width() - x_w).max(20.0)),
+            );
+            if clearable {
+                let (r, x) = ui.allocate_exact_size(vec2(x_size, x_size), Sense::click());
+                x.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, clear_label));
+                ui.painter().rect_filled(r, theme::RADIUS_SMALL, button_fill(&x, Color32::TRANSPARENT, p));
+                icons::paint(ui.painter(), r.shrink(5.0), Icon::X, if x.hovered() { p.fg } else { p.fg_muted });
+                cleared = x.tip(clear_label).on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
+            }
+            resp
+        })
+        .inner;
+    (resp, cleared)
+}
+
 /// Icon and color for a CI or review result.
 pub fn status_icon(state: &str, p: &Palette) -> (Icon, Color32) {
     match state {
@@ -919,6 +1144,54 @@ pub fn status_icon(state: &str, p: &Palette) -> (Icon, Color32) {
         "FAILURE" | "ERROR" | "TIMED_OUT" | "STARTUP_FAILURE" | "ACTION_REQUIRED" => (Icon::X, p.closed),
         "CANCELLED" | "SKIPPED" | "NEUTRAL" | "STALE" => (Icon::Skip, p.fg_muted),
         _ => (Icon::Dot, p.attention),
+    }
+}
+
+/// A status icon that explains itself on hover, like "2 non-required
+/// checks failed". Same look as `icons::show` with `status_icon`.
+pub fn status_icon_tip(ui: &mut Ui, state: &str, size: f32, tip_text: &str, p: &Palette) -> egui::Response {
+    let (icon, color) = status_icon(state, p);
+    let resp = icons::show(ui, icon, size, color).interact(Sense::hover());
+    tip(&resp, tip_text);
+    resp
+}
+
+/// Tooltip for a CI icon from the full check list: what failed, and
+/// whether it's required, e.g. "2 non-required checks failed · 12 passed".
+pub fn checks_tip(checks: &[crate::github::Check]) -> String {
+    let count = |required: Option<bool>, rank: u8| checks.iter().filter(|c| check_rank(&c.result) == rank && required.is_none_or(|r| c.required == r)).count();
+    let plural = |n: usize, one: &str, many: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {many}") };
+    let mut parts = Vec::new();
+    let (req_failed, other_failed) = (count(Some(true), 0), count(Some(false), 0));
+    if req_failed > 0 {
+        parts.push(plural(req_failed, "required check failed", "required checks failed"));
+    }
+    if other_failed > 0 {
+        parts.push(plural(other_failed, "non-required check failed", "non-required checks failed"));
+    }
+    let (running, passed, skipped) = (count(None, 1), count(None, 2), count(None, 3));
+    if running > 0 {
+        parts.push(format!("{running} running"));
+    }
+    if passed > 0 {
+        parts.push(format!("{passed} passed"));
+    }
+    if skipped > 0 {
+        parts.push(format!("{skipped} skipped"));
+    }
+    if parts.is_empty() { "No checks".into() } else { parts.join(" · ") }
+}
+
+/// Tooltip for a CI icon when only the overall result is known (list
+/// rows). With the merge state it can tell failing checks that block
+/// merging from ones that don't.
+pub fn ci_tip(state: &str, merge_state: Option<&str>) -> &'static str {
+    match (check_rank(state), merge_state) {
+        (0, Some("CLEAN" | "HAS_HOOKS" | "UNSTABLE")) => "Checks that aren't required failed. Merging isn't blocked.",
+        (0, _) => "Some checks failed",
+        (1, _) => "Checks are running",
+        (2, _) => "All checks passed",
+        _ => "Checks were skipped",
     }
 }
 

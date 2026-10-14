@@ -27,11 +27,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             let empty = data.is_some_and(|d| d.rows.is_empty());
             if empty {
                 // The list already says why it's empty; just point the way out.
-                ui.label(RichText::new("No pull request selected").font(theme::bold(20.0)));
-                ui.label(RichText::new(EMPTY_HINT).color(p.fg_muted).size(13.0));
+                ui.label(RichText::new("No pull request selected").font(theme::bold(theme::TEXT_HEADING)));
+                ui.label(RichText::new(EMPTY_HINT).color(p.fg_muted).size(theme::TEXT_DENSE));
             } else {
-                ui.label(RichText::new("No pull request selected").font(theme::bold(20.0)));
-                ui.label(RichText::new(EMPTY_HINT).color(p.fg_muted).size(13.0));
+                ui.label(RichText::new("No pull request selected").font(theme::bold(theme::TEXT_HEADING)));
+                ui.label(RichText::new(EMPTY_HINT).color(p.fg_muted).size(theme::TEXT_DENSE));
             }
         });
         return;
@@ -199,9 +199,9 @@ fn slim_header(ui: &mut Ui, p: &Palette, sel: &PrSummary, d: Option<&PrDetail>) 
     let draft = d.map(|d| d.is_draft).unwrap_or(sel.is_draft);
     let (icon, _, word) = pr_icon(state, draft, p);
     ui.horizontal(|ui| {
-        ui.set_min_height(32.0);
+        ui.set_min_height(theme::CONTROL_H);
         // The state stays in view, like GitHub's sticky header.
-        state_badge(ui, icon, badge_color(p, state, draft), word, 24.0);
+        state_badge(ui, p, icon, badge_color(p, state, draft), word, 24.0);
         ui.add_space(4.0);
         // The number always shows; only the title text gets cut.
         let num = ui.painter().layout_no_wrap(format!("#{}", sel.number), theme::body(15.0), p.fg_muted);
@@ -230,8 +230,8 @@ fn full_header(app: &mut App, ui: &mut Ui, p: &Palette, sel: &PrSummary, d: Opti
         let mut job = egui::text::LayoutJob::default();
         job.wrap.max_width = title_w;
         super::append_title(&mut job, &sel.title, 26.0, false, 0.0, p);
-        // A real space, so the number can wrap on its own.
-        job.append(&format!(" #{}", sel.number), 4.0, egui::TextFormat { font_id: theme::body(26.0), color: p.fg_muted, ..Default::default() });
+        // A no-break space: the number wraps with the last word, never alone.
+        job.append(&format!("\u{a0}#{}", sel.number), 4.0, egui::TextFormat { font_id: theme::body(26.0), color: p.fg_muted, ..Default::default() });
         let g = ui.painter().layout_job(job);
         let (rect, _) = ui.allocate_exact_size(vec2(title_w, g.size().y), Sense::hover());
         ui.painter().galley(rect.min, g, p.fg);
@@ -251,14 +251,14 @@ fn full_header(app: &mut App, ui: &mut Ui, p: &Palette, sel: &PrSummary, d: Opti
         let state = d.map(|d| d.state.as_str()).unwrap_or(&sel.state);
         let draft = d.map(|d| d.is_draft).unwrap_or(sel.is_draft);
         let (icon, _, word) = pr_icon(state, draft, p);
-        state_badge(ui, icon, badge_color(p, state, draft), word, 32.0);
+        state_badge(ui, p, icon, badge_color(p, state, draft), word, 32.0);
         ui.add_space(4.0);
         // The sentence wraps in its own column, never under the badge.
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().interact_size.y = 32.0;
             let author = sel.author.as_ref().map(|a| a.login.as_str()).unwrap_or("ghost");
             ui.spacing_mut().item_spacing.x = 4.0;
-            ui.label(RichText::new(author).font(theme::bold(14.0)).color(p.fg));
+            ui.label(RichText::new(author).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
             if let Some(d) = d {
                 let n = d.commits.total_count;
                 let commits = format!("{n} commit{}", if n == 1 { "" } else { "s" });
@@ -266,8 +266,8 @@ fn full_header(app: &mut App, ui: &mut Ui, p: &Palette, sel: &PrSummary, d: Opti
                 ui.label(RichText::new(format!("{verb} {commits} into")).color(p.fg_muted));
                 branch(ui, p, &d.base_ref_name);
                 // "from" wraps together with its branch, never left at a line end.
-                let from_w = ui.painter().layout_no_wrap("from".into(), theme::body(14.0), p.fg).size().x;
-                let branch_w = ui.painter().layout_no_wrap(d.head_ref_name.clone(), theme::mono(12.0), p.fg).size().x + 20.0;
+                let from_w = ui.painter().layout_no_wrap("from".into(), theme::body(theme::TEXT_BODY), p.fg).size().x;
+                let branch_w = ui.painter().layout_no_wrap(d.head_ref_name.clone(), theme::mono(theme::TEXT_SMALL), p.fg).size().x + 20.0;
                 if from_w + 4.0 + branch_w > ui.available_size_before_wrap().x {
                     ui.end_row();
                 }
@@ -317,10 +317,10 @@ fn tab_row(app: &mut App, ui: &mut Ui, p: &Palette, d: Option<&PrDetail>, file_c
         let toggle_w = if app.details_folded { 36.0 } else { 0.0 };
         let stat = d.map(|d| (format!("+{}", d.additions), format!("−{}", d.deletions)));
         let stat_w = stat.as_ref().map_or(0.0, |(a, r)| {
-            let w = |t: &str| ui.painter().layout_no_wrap(t.to_string(), theme::bold(13.0), p.fg).size().x;
+            let w = |t: &str| ui.painter().layout_no_wrap(t.to_string(), theme::bold(theme::TEXT_DENSE), p.fg).size().x;
             w(a) + w(r) + 50.0 + 12.0 + 16.0
         });
-        let natural = |compact: bool| tabs.iter().map(|(tab, _, text, count)| tab_width(ui, p, text, *count, active == *tab, compact)).sum::<f32>();
+        let natural = |compact: bool| tabs.iter().map(|(_, _, text, count)| tab_width(ui, p, text, *count, compact)).sum::<f32>();
         // The diffstat goes first; icons only when the tabs alone won't fit
         // (GitHub keeps them at normal widths).
         let compact = natural(false) + toggle_w > avail;
@@ -383,9 +383,9 @@ fn tab_row(app: &mut App, ui: &mut Ui, p: &Palette, d: Option<&PrDetail>, file_c
                 let (rect, _) = ui.allocate_exact_size(vec2(50.0, 16.0), Sense::hover());
                 diff::diffstat_blocks(ui.painter(), p, pos2(rect.left(), rect.center().y), d.additions, d.deletions);
                 ui.add_space(6.0);
-                ui.label(RichText::new(dels).font(theme::bold(13.0)).color(p.closed));
+                ui.label(RichText::new(dels).font(theme::bold(theme::TEXT_DENSE)).color(p.closed));
                 ui.add_space(6.0);
-                ui.label(RichText::new(adds).font(theme::bold(13.0)).color(p.open));
+                ui.label(RichText::new(adds).font(theme::bold(theme::TEXT_DENSE)).color(p.open));
             }
         });
     });
@@ -404,7 +404,7 @@ fn merge_bar(app: &mut App, ui: &mut Ui, p: &Palette, ms: &super::MergeStatus, d
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             // Same height whatever the state, so the tabs don't jump between PRs.
-            ui.set_min_height(32.0);
+            ui.set_min_height(theme::CONTROL_H);
             // One estimate of the buttons' width for both decisions below:
             // stack the buttons under the status, and show the reason whole.
             let controls_w = match d {
@@ -414,11 +414,11 @@ fn merge_bar(app: &mut App, ui: &mut Ui, p: &Palette, ms: &super::MergeStatus, d
                 None => 0.0,
             } + if d.is_some_and(|d| can_approve(app, d)) { 110.0 } else { 0.0 };
             let measure = |t: &str, f: egui::FontId| ui.painter().layout_no_wrap(t.to_string(), f, p.fg).size().x;
-            let title_w = measure(&ms.title, theme::bold(14.0));
+            let title_w = measure(&ms.title, theme::bold(theme::TEXT_BODY));
             let avail = ui.available_width();
             // The reason matters more than one line: if it won't fit beside the
             // buttons, the buttons move down (GitHub always says why).
-            let reason_w = 36.0 + title_w + 8.0 + measure(&ms.detail, theme::body(13.0));
+            let reason_w = 36.0 + title_w + 8.0 + measure(&ms.detail, theme::body(theme::TEXT_DENSE));
             let stacked = avail < 36.0 + title_w + 80.0 + controls_w || (!ms.detail.is_empty() && reason_w + 16.0 + controls_w > avail);
             // The buttons fit beside the title alone: the reason goes under
             // the title instead of the buttons under everything.
@@ -427,12 +427,12 @@ fn merge_bar(app: &mut App, ui: &mut Ui, p: &Palette, ms: &super::MergeStatus, d
             let status = |ui: &mut Ui| {
                 let (rect, _) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::hover());
                 ui.painter().circle_filled(rect.center(), 14.0, ms.color);
-                icons::paint(ui.painter(), rect.shrink(7.0), ms.icon, Color32::WHITE);
+                icons::paint(ui.painter(), rect.shrink(7.0), ms.icon, p.fg_on_emphasis);
                 ui.add_space(4.0);
-                let title = ui.label(RichText::new(&ms.title).font(theme::bold(14.0)).color(p.fg));
+                let title = ui.label(RichText::new(&ms.title).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
                 // The reason shows whole or not at all (then as the title's tooltip).
                 if reason_fits {
-                    ui.label(RichText::new(&ms.detail).size(13.0).color(p.fg_muted));
+                    ui.label(RichText::new(&ms.detail).size(theme::TEXT_DENSE).color(p.fg_muted));
                 } else if !ms.detail.is_empty() {
                     title.tip(&ms.detail);
                 }
@@ -440,7 +440,7 @@ fn merge_bar(app: &mut App, ui: &mut Ui, p: &Palette, ms: &super::MergeStatus, d
             let mut controls = |ui: &mut Ui| {
                 if let Some(d) = d {
                     merge_controls(app, ui, p, ms, d);
-                    if !d.checks.is_empty() && app.tab != Tab::Checks && link(ui, "View checks", 13.0, p).clicked() {
+                    if !d.checks.is_empty() && app.tab != Tab::Checks && link(ui, "View checks", theme::TEXT_DENSE, p).clicked() {
                         app.actions.push(Action::Tab(Tab::Checks));
                     }
                 }
@@ -451,14 +451,14 @@ fn merge_bar(app: &mut App, ui: &mut Ui, p: &Palette, ms: &super::MergeStatus, d
                 ui.horizontal(|ui| {
                     // 28px icon + the two gaps before the title.
                     ui.add_space(28.0 + 4.0 + ui.spacing().item_spacing.x);
-                    ui.add(egui::Label::new(RichText::new(&ms.detail).size(13.0).color(p.fg_muted)).wrap());
+                    ui.add(egui::Label::new(RichText::new(&ms.detail).size(theme::TEXT_DENSE).color(p.fg_muted)).wrap());
                 });
             } else if stacked {
                 ui.horizontal(status);
                 ui.add_space(6.0);
                 // Only as tall as the buttons (a bare layout here would fill
                 // the rest of the window).
-                ui.allocate_ui_with_layout(vec2(ui.available_width(), 32.0), egui::Layout::right_to_left(egui::Align::Center), |ui| controls(ui));
+                ui.allocate_ui_with_layout(vec2(ui.available_width(), theme::CONTROL_H), egui::Layout::right_to_left(egui::Align::Center), |ui| controls(ui));
             } else {
                 egui::Sides::new().shrink_left().show(ui, status, controls);
             }
@@ -502,7 +502,7 @@ fn approve_button(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
 /// confirm step, and auto-merge.
 fn merge_actions(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
     if app.posting {
-        ui.add(egui::Spinner::new().size(16.0));
+        ui.add(egui::Spinner::new().size(theme::ICON));
         return;
     }
     if d.is_draft {
@@ -554,11 +554,11 @@ fn merge_actions(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
 /// pull its halves apart.
 #[allow(clippy::too_many_arguments)]
 fn split_button(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail, label: &str, method: &str, ready: bool, why: &str, on_click: Action) {
-    let font = theme::bold(14.0);
-    let text_color = if ready { Color32::WHITE } else { p.fg };
+    let font = theme::bold(theme::TEXT_BODY);
+    let text_color = if ready { p.fg_on_emphasis } else { p.fg };
     let g = ui.painter().layout_no_wrap(label.to_string(), font, text_color);
     let main_w = g.size().x + 24.0;
-    let (rect, _) = ui.allocate_exact_size(vec2(main_w + 30.0, 32.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(main_w + 30.0, theme::CONTROL_H), Sense::hover());
     let main_rect = Rect::from_min_size(rect.min, vec2(main_w, rect.height()));
     let caret_rect = Rect::from_min_max(pos2(main_rect.right(), rect.top()), rect.max);
     // Scoped to the parent: the same button appears at the top and in the merge box.
@@ -566,11 +566,8 @@ fn split_button(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail, label: &s
     let caret = ui.interact(caret_rect, ui.id().with(("merge-caret", &d.id)), Sense::click());
     main.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ready, label));
     caret.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Choose how to merge"));
-    let (fill, hover_fill, border) = if ready {
-        (p.btn_primary, p.btn_primary.gamma_multiply(0.9), p.btn_primary.gamma_multiply(0.85))
-    } else {
-        (p.btn_bg, ui.visuals().widgets.hovered.weak_bg_fill, p.border)
-    };
+    let (fill, hover_fill, border) =
+        if ready { (p.btn_primary, p.btn_primary.gamma_multiply(0.9), p.btn_primary.gamma_multiply(0.85)) } else { (p.btn_bg, p.btn_hover, p.border) };
     let painter = ui.painter();
     painter.rect_filled(rect, 6.0, fill);
     if main.hovered() && ready {
@@ -583,10 +580,10 @@ fn split_button(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail, label: &s
     let divider = if ready { Color32::from_black_alpha(60) } else { p.border };
     painter.vline(main_rect.right(), rect.y_range(), Stroke::new(1.0, divider));
     // Can't merge yet: GitHub greys the label out.
-    let label_color = if ready { Color32::WHITE } else { p.fg_muted.gamma_multiply(0.75) };
-    painter.text(main_rect.center(), egui::Align2::CENTER_CENTER, label, theme::bold(14.0), label_color);
+    let label_color = if ready { p.fg_on_emphasis } else { p.fg_muted.gamma_multiply(0.75) };
+    painter.text(main_rect.center(), egui::Align2::CENTER_CENTER, label, theme::bold(theme::TEXT_BODY), label_color);
     let c = caret_rect.center();
-    let caret_color = if ready { Color32::WHITE } else { p.fg_muted.gamma_multiply(0.75) };
+    let caret_color = if ready { p.fg_on_emphasis } else { p.fg_muted.gamma_multiply(0.75) };
     painter.add(egui::Shape::convex_polygon(vec![pos2(c.x - 4.0, c.y - 2.0), pos2(c.x + 4.0, c.y - 2.0), pos2(c.x, c.y + 2.5)], caret_color, Stroke::NONE));
     if ready {
         let main = main.on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -629,8 +626,8 @@ fn method_popup(app: &mut App, p: &Palette, d: &PrDetail, method: &str, resp: &e
                 icons::paint(ui.painter(), Rect::from_min_size(pos2(rect.left() + 8.0, rect.top() + 10.0), vec2(16.0, 16.0)), Icon::Check, p.fg);
             }
             let x = rect.left() + 32.0;
-            ui.painter().text(pos2(x, rect.top() + 18.0), egui::Align2::LEFT_CENTER, crate::app::merge_method_label(m), theme::bold(14.0), p.fg);
-            let g = ui.painter().layout(about, theme::body(12.0), p.fg_muted, rect.right() - x - 8.0);
+            ui.painter().text(pos2(x, rect.top() + 18.0), egui::Align2::LEFT_CENTER, crate::app::merge_method_label(m), theme::bold(theme::TEXT_BODY), p.fg);
+            let g = ui.painter().layout(about, theme::body(theme::TEXT_SMALL), p.fg_muted, rect.right() - x - 8.0);
             ui.painter().galley(pos2(x, rect.top() + 28.0), g, p.fg_muted);
             if r.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                 app.actions.push(Action::SetMergeMethod(m.to_string()));
@@ -652,37 +649,42 @@ fn badge_color(p: &Palette, state: &str, draft: bool) -> Color32 {
 
 /// "Open", "Draft", ... in a filled pill, 32 tall (or smaller for the
 /// slim header).
-fn state_badge(ui: &mut Ui, icon: Icon, color: Color32, word: &str, height: f32) {
+fn state_badge(ui: &mut Ui, p: &Palette, icon: Icon, color: Color32, word: &str, height: f32) {
     let k = height / 32.0;
-    let g = ui.painter().layout_no_wrap(word.to_string(), theme::bold(14.0 * k.max(0.85)), Color32::WHITE);
+    let g = ui.painter().layout_no_wrap(word.to_string(), theme::bold(14.0 * k.max(0.85)), p.fg_on_emphasis);
     let icon_s = 16.0 * k.max(0.85);
     let pad = 12.0 * k;
     let size = vec2(pad + icon_s + 6.0 * k + g.size().x + pad, height);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     ui.painter().rect_filled(rect, CornerRadius::same(255), color);
-    icons::paint(ui.painter(), Rect::from_min_size(pos2(rect.left() + pad, rect.center().y - icon_s / 2.0), vec2(icon_s, icon_s)), icon, Color32::WHITE);
-    ui.painter().galley(pos2(rect.left() + pad + icon_s + 6.0 * k, rect.center().y - g.size().y / 2.0), g, Color32::WHITE);
+    icons::paint(ui.painter(), Rect::from_min_size(pos2(rect.left() + pad, rect.center().y - icon_s / 2.0), vec2(icon_s, icon_s)), icon, p.fg_on_emphasis);
+    ui.painter().galley(pos2(rect.left() + pad + icon_s + 6.0 * k, rect.center().y - g.size().y / 2.0), g, p.fg_on_emphasis);
 }
 
 fn branch(ui: &mut Ui, p: &Palette, name: &str) {
     let fg = p.accent;
-    pill(ui, name, theme::mono(12.0), p.accent_subtle, fg, Color32::TRANSPARENT);
+    pill(ui, name, theme::mono(theme::TEXT_SMALL), p.accent_subtle, fg, Color32::TRANSPARENT);
+}
+
+/// Width of a tab's label. Always measured bold, so a tab keeps its size
+/// (and its neighbors stay put) when it becomes the active one.
+fn tab_label_w(ui: &Ui, p: &Palette, text: &str) -> f32 {
+    ui.painter().layout_no_wrap(text.to_string(), theme::bold(theme::TEXT_BODY), p.fg).size().x
 }
 
 /// A tab's width. `compact` drops the icon and tightens the padding.
-fn tab_width(ui: &Ui, p: &Palette, text: &str, count: Option<u64>, active: bool, compact: bool) -> f32 {
-    let font = if active { theme::bold(14.0) } else { theme::body(14.0) };
-    let text_w = ui.painter().layout_no_wrap(text.to_string(), font, p.fg).size().x;
-    let count_w = count.map(|n| ui.painter().layout_no_wrap(n.to_string(), theme::bold(12.0), p.fg).size().x + 14.0 + 8.0).unwrap_or(0.0);
+fn tab_width(ui: &Ui, p: &Palette, text: &str, count: Option<u64>, compact: bool) -> f32 {
+    let text_w = tab_label_w(ui, p, text);
+    let count_w = count.map(|n| ui.painter().layout_no_wrap(n.to_string(), theme::bold(theme::TEXT_SMALL), p.fg).size().x + 14.0 + 8.0).unwrap_or(0.0);
     let pad = if compact { 10.0 } else { 16.0 };
     let icon = if compact { 0.0 } else { 24.0 };
     pad + icon + text_w + count_w + pad
 }
 
 fn tab_button(ui: &mut Ui, p: &Palette, icon: Icon, text: &str, count: Option<u64>, active: bool, compact: bool) -> egui::Response {
-    let font = if active { theme::bold(14.0) } else { theme::body(14.0) };
+    let font = if active { theme::bold(theme::TEXT_BODY) } else { theme::body(theme::TEXT_BODY) };
     let g = ui.painter().layout_no_wrap(text.to_string(), font, p.fg);
-    let w = tab_width(ui, p, text, count, active, compact);
+    let w = tab_width(ui, p, text, count, compact);
     let (rect, resp) = ui.allocate_exact_size(vec2(w, 44.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, text));
     let painter = ui.painter();
@@ -695,20 +697,19 @@ fn tab_button(ui: &mut Ui, p: &Palette, icon: Icon, text: &str, count: Option<u6
         x += 24.0;
     }
     let gh = g.size().y;
-    let gw = g.size().x;
     painter.galley(pos2(x, rect.center().y - gh / 2.0), g, p.fg);
-    x += gw + 8.0;
+    // The count sits after the bold width either way, so it doesn't move.
+    x += tab_label_w(ui, p, text) + 8.0;
     if let Some(n) = count {
-        let bg = if p.dark { Color32::from_rgb(0x2f, 0x35, 0x3d) } else { Color32::from_rgb(0xe6, 0xea, 0xef) };
-        let cg = painter.layout_no_wrap(n.to_string(), theme::bold(12.0), p.fg);
+        let cg = painter.layout_no_wrap(n.to_string(), theme::bold(theme::TEXT_SMALL), p.fg);
         let cr = Rect::from_min_size(pos2(x, rect.center().y - 10.0), vec2(cg.size().x + 14.0, 20.0));
-        painter.rect_filled(cr, CornerRadius::same(255), bg);
+        painter.rect_filled(cr, CornerRadius::same(255), p.counter_bg);
         painter.galley(pos2(cr.left() + 7.0, cr.center().y - cg.size().y / 2.0), cg, p.fg);
     }
     if active {
         // GitHub's orange underline for the selected tab.
         let line = Rect::from_min_max(pos2(rect.left() + 8.0, rect.bottom() - 2.0), pos2(rect.right() - 8.0, rect.bottom()));
-        painter.rect_filled(line, 2.0, Color32::from_rgb(0xfd, 0x8c, 0x73));
+        painter.rect_filled(line, 2.0, p.tab_underline);
     }
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -774,7 +775,7 @@ fn details_panel(app: &mut App, ui: &mut Ui, p: &Palette, d: &Arc<PrDetail>) {
         |ui, expanded| {
             if expanded {
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Details").font(theme::bold(16.0)).color(p.fg));
+                    ui.label(RichText::new("Details").font(theme::bold(theme::TEXT_LARGE)).color(p.fg));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         toggle |= icon_button(ui, Icon::SidebarRightClose, "Hide details (⇧⌘B)", p).clicked();
                     });
@@ -968,7 +969,7 @@ fn event_line(ui: &mut Ui, p: &Palette, icon: Icon, badge: Option<Color32>, who:
         match badge {
             Some(fill) => {
                 ui.painter().circle(rect.center(), 16.0, fill, Stroke::new(2.0, p.canvas));
-                icons::paint(ui.painter(), rect.shrink(8.0), icon, Color32::WHITE);
+                icons::paint(ui.painter(), rect.shrink(8.0), icon, p.fg_on_emphasis);
             }
             None => {
                 ui.painter().circle(rect.center(), 16.0, p.canvas_subtle, Stroke::new(2.0, p.canvas));
@@ -982,9 +983,9 @@ fn event_line(ui: &mut Ui, p: &Palette, icon: Icon, badge: Option<Color32>, who:
             ui.spacing_mut().interact_size.y = 20.0;
             if let Some(a) = who {
                 super::avatar_of(ui, &a.login, &a.avatar_url, 20.0);
-                ui.label(RichText::new(&a.login).font(theme::bold(14.0)).color(p.fg));
+                ui.label(RichText::new(&a.login).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
                 if is_bot(&a.login, &a.avatar_url) {
-                    pill(ui, "bot", theme::body(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
+                    pill(ui, "bot", theme::body(theme::TEXT_SMALL), Color32::TRANSPARENT, p.fg_muted, p.border);
                 }
             }
             body(ui);
@@ -992,8 +993,19 @@ fn event_line(ui: &mut Ui, p: &Palette, icon: Icon, badge: Option<Color32>, who:
     });
 }
 
+/// The one look for a commit SHA: small, muted monospace.
+fn sha_font() -> egui::FontId {
+    theme::mono(theme::TEXT_SMALL)
+}
+
+/// A SHA that opens its commit: muted, blue and underlined on hover, the
+/// full SHA as its tooltip. Used on the timeline and the commit page.
+fn sha_text(ui: &mut Ui, p: &Palette, short: &str, full: &str) -> egui::Response {
+    link_styled(ui, short, sha_font(), p.fg_muted).tip(full)
+}
+
 fn sha_link(app: &mut App, ui: &mut Ui, p: &Palette, repo: &str, c: &EventCommit) {
-    if link_styled(ui, &c.abbreviated_oid, theme::mono(13.0), p.fg).tip(&c.oid).clicked() {
+    if sha_text(ui, p, &c.abbreviated_oid, &c.oid).clicked() {
         app.actions.push(Action::OpenCommit(repo.to_string(), c.oid.clone()));
     }
 }
@@ -1057,7 +1069,7 @@ fn event_row(app: &mut App, ui: &mut Ui, p: &Palette, events: &[&Event], repo: &
             let n = names.len();
             for (i, name) in names.iter().enumerate() {
                 let sep = if i + 2 < n { "," } else { "" };
-                ui.label(RichText::new(format!("{name}{sep}")).font(theme::bold(14.0)).color(p.fg));
+                ui.label(RichText::new(format!("{name}{sep}")).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
                 if i + 2 == n {
                     muted(ui, "and");
                 }
@@ -1073,7 +1085,7 @@ fn event_row(app: &mut App, ui: &mut Ui, p: &Palette, events: &[&Event], repo: &
                 muted(ui, &format!("self-assigned this {ago}"));
             } else {
                 muted(ui, "assigned");
-                ui.label(RichText::new(name).font(theme::bold(14.0)).color(p.fg));
+                ui.label(RichText::new(name).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
                 muted(ui, &ago);
             }
         }),
@@ -1119,7 +1131,7 @@ fn commits_row(app: &mut App, ui: &mut Ui, p: &Palette, commits: &[&EventCommit]
         if who.is_none() {
             avatar(ui, "", 20.0);
             let name = first.author.as_ref().and_then(|a| a.name.clone()).unwrap_or_else(|| "Someone".into());
-            ui.label(RichText::new(name).font(theme::bold(14.0)).color(p.fg));
+            ui.label(RichText::new(name).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
         }
         ui.label(RichText::new(format!("added {n} commit{} {}", if n == 1 { "" } else { "s" }, util::ago(&first.committed_date))).color(p.fg_muted));
     });
@@ -1130,7 +1142,7 @@ fn commits_row(app: &mut App, ui: &mut Ui, p: &Palette, commits: &[&EventCommit]
             super::avatar_of(ui, a.map(|u| u.login.as_str()).unwrap_or(""), a.map(|u| u.avatar_url.as_str()).unwrap_or(""), 16.0);
             let msg_w = (ui.available_width() - 90.0).max(80.0);
             let mut job = egui::text::LayoutJob::default();
-            super::append_title(&mut job, &c.message_headline, 13.0, false, 0.0, p);
+            super::append_title(&mut job, &c.message_headline, theme::TEXT_DENSE, false, 0.0, p);
             let (g, cut) = super::cut_job(ui.painter(), job.clone(), msg_w);
             let (r, resp) = ui.allocate_exact_size(g.size(), Sense::click());
             // Hover: blue text and underline, like a link on github.com.
@@ -1146,13 +1158,7 @@ fn commits_row(app: &mut App, ui: &mut Ui, p: &Palette, commits: &[&EventCommit]
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 sha_link(app, ui, p, repo, c);
                 if let Some(r) = &c.status_check_rollup {
-                    let (icon, color) = status_icon(&r.state, p);
-                    icons::show(ui, icon, 14.0, color).tip(match r.state.as_str() {
-                        "SUCCESS" => "All checks passed",
-                        "FAILURE" | "ERROR" => "Some checks failed",
-                        "PENDING" | "EXPECTED" => "Checks are running",
-                        _ => "Checks",
-                    });
+                    super::status_icon_tip(ui, &r.state, 14.0, rollup_tip(&r.state), p);
                 }
             });
         });
@@ -1232,7 +1238,7 @@ fn comment_card(
                         let bot = is_bot(login, avatar_url);
                         let text_w = (ui.available_width() - 40.0 - author_w - if bot { 40.0 } else { 0.0 }).max(60.0);
                         let mut job = egui::text::LayoutJob::default();
-                        job.append(login, 0.0, egui::TextFormat { font_id: theme::bold(14.0), color: p.fg, ..Default::default() });
+                        job.append(login, 0.0, egui::TextFormat { font_id: theme::bold(theme::TEXT_BODY), color: p.fg, ..Default::default() });
                         // "github-actions [bot] commented …": the badge goes
                         // right after the name, so the text is drawn in two parts.
                         if bot {
@@ -1242,11 +1248,15 @@ fn comment_card(
                             if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
                                 open_link = true;
                             }
-                            pill(ui, "bot", theme::body(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
+                            pill(ui, "bot", theme::body(theme::TEXT_SMALL), Color32::TRANSPARENT, p.fg_muted, p.border);
                         }
                         let text_w = if bot { (ui.available_width() - 40.0 - author_w).max(60.0) } else { text_w };
-                        job.append(verb, if bot { 0.0 } else { 4.0 }, egui::TextFormat { font_id: theme::body(14.0), color: p.fg_muted, ..Default::default() });
-                        job.append(&util::ago(time), 4.0, egui::TextFormat { font_id: theme::body(14.0), color: p.fg_muted, ..Default::default() });
+                        job.append(
+                            verb,
+                            if bot { 0.0 } else { 4.0 },
+                            egui::TextFormat { font_id: theme::body(theme::TEXT_BODY), color: p.fg_muted, ..Default::default() },
+                        );
+                        job.append(&util::ago(time), 4.0, egui::TextFormat { font_id: theme::body(theme::TEXT_BODY), color: p.fg_muted, ..Default::default() });
                         job.wrap = egui::text::TextWrapping::truncate_at_width(text_w);
                         let g = ui.painter().layout_job(job);
                         let (r, resp) = ui.allocate_exact_size(g.size(), Sense::click());
@@ -1261,7 +1271,7 @@ fn comment_card(
                             ui.spacing_mut().item_spacing.x = 4.0;
                             comment_menu(ui, p, url, body, &mut menu_acts);
                             if login == pr_author {
-                                pill(ui, "Author", theme::bold(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
+                                pill(ui, "Author", theme::bold(theme::TEXT_SMALL), Color32::TRANSPARENT, p.fg_muted, p.border);
                             }
                         });
                     });
@@ -1308,8 +1318,8 @@ fn markdown(app: &mut App, ui: &mut Ui, p: &Palette, body: &str, id: &str, repo:
 
 fn review_event(app: &mut App, ui: &mut Ui, p: &Palette, r: &Review) {
     let (icon, badge_bg, badge_fg, verb) = match r.state.as_str() {
-        "APPROVED" => (Icon::Check, p.open_emphasis, Color32::WHITE, "approved these changes"),
-        "CHANGES_REQUESTED" => (Icon::FileDiff, p.closed_emphasis, Color32::WHITE, "requested changes"),
+        "APPROVED" => (Icon::Check, p.open_emphasis, p.fg_on_emphasis, "approved these changes"),
+        "CHANGES_REQUESTED" => (Icon::FileDiff, p.closed_emphasis, p.fg_on_emphasis, "requested changes"),
         "DISMISSED" => (Icon::X, p.canvas_subtle, p.fg_muted, "had their review dismissed"),
         "PENDING" => (Icon::Eye, p.canvas_subtle, p.attention, "has a pending review (only you can see it)"),
         _ => (Icon::Eye, p.canvas_subtle, p.fg_muted, "reviewed"),
@@ -1324,14 +1334,14 @@ fn review_event(app: &mut App, ui: &mut Ui, p: &Palette, r: &Review) {
         let av = r.author.as_ref().map(|a| a.avatar_url.as_str()).unwrap_or("");
         super::avatar_of(ui, login, av, 20.0);
         ui.spacing_mut().item_spacing.x = 4.0;
-        ui.label(RichText::new(login).font(theme::bold(14.0)).color(p.fg));
+        ui.label(RichText::new(login).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
         if is_bot(login, av) {
-            pill(ui, "bot", theme::body(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
+            pill(ui, "bot", theme::body(theme::TEXT_SMALL), Color32::TRANSPARENT, p.fg_muted, p.border);
         }
         ui.label(RichText::new(verb).color(p.fg_muted));
         ui.label(RichText::new(util::ago(r.submitted_at.as_deref().unwrap_or(""))).color(p.fg_muted));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if link_styled(ui, "View reviewed changes", theme::body(12.0), p.fg_muted).clicked() {
+            if link_styled(ui, "View reviewed changes", theme::body(theme::TEXT_SMALL), p.fg_muted).clicked() {
                 app.actions.push(Action::Tab(Tab::Files));
             }
         });
@@ -1375,8 +1385,8 @@ fn thread_box(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, repo: &str) {
                             };
                         let room = (ui.available_width() - badges - 12.0).max(80.0);
                         // The line number is in the tooltip, not the header, like GitHub.
-                        let shown = super::elide_front(ui.painter(), &t.path, theme::mono(12.0), room);
-                        let g = ui.painter().layout_no_wrap(shown, theme::mono(12.0), path_color);
+                        let shown = super::elide_front(ui.painter(), &t.path, theme::mono(theme::TEXT_SMALL), room);
+                        let g = ui.painter().layout_no_wrap(shown, theme::mono(theme::TEXT_SMALL), path_color);
                         let (r, resp) = ui.allocate_exact_size(g.size(), Sense::click());
                         let hovered = resp.hovered();
                         ui.painter().galley(r.min, g, path_color);
@@ -1387,19 +1397,19 @@ fn thread_box(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, repo: &str) {
                             acts.push(Action::OpenUrl(first.url.clone()));
                         }
                         if t.is_outdated {
-                            pill(ui, "Outdated", theme::bold(12.0), Color32::TRANSPARENT, p.attention, p.attention.gamma_multiply(0.5));
+                            pill(ui, "Outdated", theme::bold(theme::TEXT_SMALL), Color32::TRANSPARENT, p.attention, p.attention.gamma_multiply(0.5));
                         }
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if busy {
-                                ui.add(egui::Spinner::new().size(16.0));
+                                ui.add(egui::Spinner::new().size(theme::ICON));
                             }
                             if t.is_resolved {
                                 let who = t.resolved_by.as_ref().map(|a| format!(" by {}", a.login)).unwrap_or_default();
-                                ui.label(RichText::new(format!("Resolved{who}")).size(12.0).color(p.fg_muted));
+                                ui.label(RichText::new(format!("Resolved{who}")).size(theme::TEXT_SMALL).color(p.fg_muted));
                                 icons::show(ui, Icon::Check, 14.0, p.fg_muted);
                             } else if folded {
                                 let n = t.comments.nodes.len();
-                                ui.label(RichText::new(format!("{n} comment{}", if n == 1 { "" } else { "s" })).size(12.0).color(p.fg_muted));
+                                ui.label(RichText::new(format!("{n} comment{}", if n == 1 { "" } else { "s" })).size(theme::TEXT_SMALL).color(p.fg_muted));
                             }
                         });
                     });
@@ -1427,17 +1437,17 @@ fn thread_box(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, repo: &str) {
                             ui.spacing_mut().item_spacing.x = 6.0;
                             let av = c.author.as_ref().map(|a| a.avatar_url.as_str()).unwrap_or("");
                             super::avatar_of(ui, login, av, 24.0);
-                            ui.label(RichText::new(login).font(theme::bold(14.0)).color(p.fg));
+                            ui.label(RichText::new(login).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
                             if is_bot(login, av) {
-                                pill(ui, "bot", theme::body(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
+                                pill(ui, "bot", theme::body(theme::TEXT_SMALL), Color32::TRANSPARENT, p.fg_muted, p.border);
                             }
-                            if link_styled(ui, &util::ago(&c.created_at), theme::body(13.0), p.fg_muted).clicked() {
+                            if link_styled(ui, &util::ago(&c.created_at), theme::body(theme::TEXT_DENSE), p.fg_muted).clicked() {
                                 acts.push(Action::OpenUrl(c.url.clone()));
                             }
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 comment_menu(ui, p, &c.url, &c.body, &mut acts);
                                 if !pr_author.is_empty() && login == pr_author {
-                                    pill(ui, "Author", theme::bold(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
+                                    pill(ui, "Author", theme::bold(theme::TEXT_SMALL), Color32::TRANSPARENT, p.fg_muted, p.border);
                                 }
                             });
                         });
@@ -1487,13 +1497,13 @@ fn thread_footer(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, busy: bool
                     if let Some(url) = &me {
                         avatar(ui, url, 24.0);
                     }
-                    ui.allocate_exact_size(vec2(ui.available_width(), 32.0), Sense::click())
+                    ui.allocate_exact_size(vec2(ui.available_width(), theme::CONTROL_H), Sense::click())
                 })
                 .inner;
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, true, "Reply…"));
             let hovered = resp.hovered();
             ui.painter().rect(rect, 6.0, p.canvas, Stroke::new(1.0, if hovered { p.fg_muted } else { p.border }), egui::StrokeKind::Inside);
-            ui.painter().text(pos2(rect.left() + 12.0, rect.center().y), egui::Align2::LEFT_CENTER, "Reply…", theme::body(14.0), p.fg_muted);
+            ui.painter().text(pos2(rect.left() + 12.0, rect.center().y), egui::Align2::LEFT_CENTER, "Reply…", theme::body(theme::TEXT_BODY), p.fg_muted);
             if resp.on_hover_cursor(egui::CursorIcon::Text).clicked() {
                 acts.push(Action::StartReply(t.id.clone()));
             }
@@ -1563,7 +1573,7 @@ fn thread_footer(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, busy: bool
                     .hint_text("Reply… (Markdown supported, ⌘Enter to send)")
                     .desired_rows(3)
                     .desired_width(f32::INFINITY)
-                    .font(theme::body(14.0))
+                    .font(theme::body(theme::TEXT_BODY))
                     .margin(vec2(8.0, 8.0)),
             ),
         );
@@ -1573,7 +1583,7 @@ fn thread_footer(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, busy: bool
         ui.horizontal(|ui| {
             resolve_button(ui, acts);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.add_enabled(!busy && !empty, primary_button("Comment", p)).clicked() {
+                if super::primary_action(ui, "Comment", !busy && !empty, p).clicked() {
                     acts.push(Action::SendReply(t.id.clone()));
                 }
                 if ui.add_enabled(!busy, button("Cancel", p)).clicked() {
@@ -1593,7 +1603,7 @@ fn thread_footer(app: &mut App, ui: &mut Ui, p: &Palette, t: &Thread, busy: bool
     ui.horizontal(|ui| {
         resolve_button(ui, acts);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.add_enabled(!busy && !empty, primary_button("Comment", p)).clicked() || (send && !empty) {
+            if super::primary_action(ui, "Comment", !busy && !empty, p).clicked() || (send && !empty) {
                 acts.push(Action::SendReply(t.id.clone()));
             }
             if ui.add_enabled(!busy, button("Cancel", p)).clicked() || cancel {
@@ -1649,7 +1659,7 @@ fn diff_tail(ui: &mut Ui, p: &Palette, hunk: &str, path: &str) {
     });
     let num_w = 44.0;
     // Long lines scroll sideways, like GitHub; the numbers scroll with them.
-    let widest = tail.iter().map(|(_, _, l)| ui.painter().layout_no_wrap(code(l), theme::mono(12.0), p.fg).size().x).fold(0.0, f32::max);
+    let widest = tail.iter().map(|(_, _, l)| ui.painter().layout_no_wrap(code(l), theme::mono(theme::TEXT_SMALL), p.fg).size().x).fold(0.0, f32::max);
     let row_w = ui.available_width().max(num_w * 2.0 + 10.0 + 14.0 + widest + 16.0);
     let scroll_id = ui.id().with(("snippet", hunk.len(), path));
     crate::markdown::solid_bar(ui);
@@ -1672,19 +1682,25 @@ fn diff_tail(ui: &mut Ui, p: &Palette, hunk: &str, path: &str) {
                 painter.rect_filled(Rect::from_min_size(rect.min, vec2(num_w * 2.0, 20.0)), 0.0, num_bg);
                 for (v, x) in [(o, num_w), (n, num_w * 2.0)] {
                     if let Some(v) = v {
-                        painter.text(pos2(rect.left() + x - 8.0, rect.center().y), egui::Align2::RIGHT_CENTER, v.to_string(), theme::mono(12.0), p.fg_muted);
+                        painter.text(
+                            pos2(rect.left() + x - 8.0, rect.center().y),
+                            egui::Align2::RIGHT_CENTER,
+                            v.to_string(),
+                            theme::mono(theme::TEXT_SMALL),
+                            p.fg_muted,
+                        );
                     }
                 }
                 let x = rect.left() + num_w * 2.0 + 10.0;
                 if l.starts_with("@@") {
-                    painter.text(pos2(x, rect.center().y), egui::Align2::LEFT_CENTER, *l, theme::mono(12.0), p.fg_muted);
+                    painter.text(pos2(x, rect.center().y), egui::Align2::LEFT_CENTER, *l, theme::mono(theme::TEXT_SMALL), p.fg_muted);
                     continue;
                 }
                 let marker = l.get(..1).unwrap_or(" ");
-                painter.text(pos2(x, rect.center().y), egui::Align2::LEFT_CENTER, marker, theme::mono(12.0), p.fg_muted);
+                painter.text(pos2(x, rect.center().y), egui::Align2::LEFT_CENTER, marker, theme::mono(theme::TEXT_SMALL), p.fg_muted);
                 let text = code(l);
                 let runs = colors.as_ref().and_then(|c| c.get(tail_start + k)).map(Vec::as_slice);
-                let g = painter.layout_job(crate::syntax::job(&text, runs, theme::mono(12.0), p.fg, p));
+                let g = painter.layout_job(crate::syntax::job(&text, runs, theme::mono(theme::TEXT_SMALL), p.fg, p));
                 painter.galley(pos2(x + 14.0, rect.center().y - g.size().y / 2.0), g, p.fg);
             }
         });
@@ -1823,7 +1839,7 @@ fn merge_box(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
     ui.horizontal_top(|ui| {
         let (rect, _) = ui.allocate_exact_size(vec2(AVATAR, AVATAR), Sense::hover());
         ui.painter().rect_filled(rect, 6.0, big_color);
-        icons::paint(ui.painter(), rect.shrink(10.0), big_icon, Color32::WHITE);
+        icons::paint(ui.painter(), rect.shrink(10.0), big_icon, p.fg_on_emphasis);
         ui.add_space(16.0 - ui.spacing().item_spacing.x);
         ui.vertical(|ui| {
             egui::Frame::new().fill(p.canvas).stroke(Stroke::new(1.0, border)).corner_radius(6).show(ui, |ui| {
@@ -1838,13 +1854,13 @@ fn merge_box(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                             ui.horizontal_top(|ui| {
                                 let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
                                 ui.painter().circle_filled(rect.center(), 16.0, l.color);
-                                icons::paint(ui.painter(), rect.shrink(9.0), l.icon, Color32::WHITE);
+                                icons::paint(ui.painter(), rect.shrink(9.0), l.icon, p.fg_on_emphasis);
                                 ui.add_space(4.0);
                                 ui.vertical(|ui| {
                                     ui.spacing_mut().item_spacing.y = 2.0;
-                                    ui.label(RichText::new(&l.title).font(theme::bold(14.0)).color(p.fg));
+                                    ui.label(RichText::new(&l.title).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
                                     if !l.detail.is_empty() {
-                                        ui.label(RichText::new(&l.detail).size(13.0).color(p.fg_muted));
+                                        ui.label(RichText::new(&l.detail).size(theme::TEXT_DENSE).color(p.fg_muted));
                                     }
                                 });
                                 // A draft's "Ready for review" sits at the end of its row.
@@ -1886,8 +1902,8 @@ fn merge_footer(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
         if let Some(a) = d.auto_merge_request.as_ref().filter(|_| !app.posting) {
             icons::show(ui, Icon::AutoMerge, 16.0, p.open);
             let who = a.enabled_by.as_ref().map(|e| format!(" by {}", e.login)).unwrap_or_default();
-            ui.label(RichText::new(format!("Auto-merge enabled{who}")).font(theme::bold(14.0)).color(p.fg));
-            ui.label(RichText::new("It will merge when all requirements are met.").size(13.0).color(p.fg_muted));
+            ui.label(RichText::new(format!("Auto-merge enabled{who}")).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
+            ui.label(RichText::new("It will merge when all requirements are met.").size(theme::TEXT_DENSE).color(p.fg_muted));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| merge_actions(app, ui, p, d));
             return;
         }
@@ -1919,7 +1935,7 @@ fn composer(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
         });
         ui.add_space(16.0 - ui.spacing().item_spacing.x);
         ui.vertical(|ui| {
-            ui.label(RichText::new("Add a comment").font(theme::bold(16.0)).color(p.fg));
+            ui.label(RichText::new("Add a comment").font(theme::bold(theme::TEXT_LARGE)).color(p.fg));
             ui.add_space(8.0);
             egui::Frame::new().fill(p.canvas).stroke(Stroke::new(1.0, p.border)).corner_radius(6).show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -1973,7 +1989,7 @@ fn composer(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                                 .hint_text("Leave a comment")
                                 .desired_rows(5)
                                 .desired_width(f32::INFINITY)
-                                .font(theme::body(14.0))
+                                .font(theme::body(theme::TEXT_BODY))
                                 .margin(vec2(8.0, 8.0)),
                         );
                         if app.focus_composer {
@@ -1996,7 +2012,7 @@ fn composer(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                         let hint_w = (ui.available_width() - buttons_w).max(0.0);
                         // Whole hint or none: a cut-off hint is just noise.
                         let hint = ["Markdown is supported · ⌘Enter to comment", "Markdown is supported"]
-                            .map(|t| ui.painter().layout_no_wrap(t.into(), theme::body(12.0), p.fg_muted))
+                            .map(|t| ui.painter().layout_no_wrap(t.into(), theme::body(theme::TEXT_SMALL), p.fg_muted))
                             .into_iter()
                             .find(|g| g.size().x <= hint_w);
                         if let Some(g) = hint {
@@ -2006,7 +2022,7 @@ fn composer(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.add_enabled_ui(!app.posting, |ui| {
                                 let empty = app.composer.trim().is_empty();
-                                let comment = ui.add_enabled(!empty, primary_button("Comment", p));
+                                let comment = super::primary_action(ui, "Comment", !empty && !app.posting, p);
                                 if comment.clicked() {
                                     app.actions.push(Action::Comment);
                                 }
@@ -2015,7 +2031,7 @@ fn composer(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                                     let resp = ui.add(button("Review changes  ▾", p));
                                     egui::Popup::menu(&resp).show(|ui| {
                                         ui.set_width(260.0);
-                                        ui.label(RichText::new("Uses the text in the comment box, if any.").size(12.0).color(p.fg_muted));
+                                        ui.label(RichText::new("Uses the text in the comment box, if any.").size(theme::TEXT_SMALL).color(p.fg_muted));
                                         ui.separator();
                                         if ui.button("Approve").tip("Submit an approving review").clicked() {
                                             app.actions.push(Action::Review("APPROVE"));
@@ -2028,11 +2044,11 @@ fn composer(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                                 // Same buttons in the same order every time.
                                 if d.state == "OPEN" {
                                     // Default button, red icon, like GitHub.
-                                    let g = ui.painter().layout_no_wrap("Close pull request".into(), theme::bold(14.0), p.fg);
+                                    let g = ui.painter().layout_no_wrap("Close pull request".into(), theme::bold(theme::TEXT_BODY), p.fg);
                                     let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 16.0 + 30.0, btn_h), Sense::click());
                                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close pull request"));
-                                    let fill = if resp.hovered() { ui.visuals().widgets.hovered.weak_bg_fill } else { p.btn_bg };
-                                    ui.painter().rect(r, 6.0, fill, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
+                                    let fill = super::button_fill(&resp, p.btn_bg, p);
+                                    ui.painter().rect(r, theme::RADIUS, fill, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
                                     icons::paint(
                                         ui.painter(),
                                         Rect::from_min_size(pos2(r.left() + 12.0, r.center().y - 8.0), vec2(16.0, 16.0)),
@@ -2045,7 +2061,7 @@ fn composer(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                                     }
                                 }
                                 if app.posting {
-                                    ui.add(egui::Spinner::new().size(16.0));
+                                    ui.add(egui::Spinner::new().size(theme::ICON));
                                 }
                             });
                         });
@@ -2083,7 +2099,7 @@ fn set_cursor(ctx: &egui::Context, id: egui::Id, a: usize, b: usize) {
 
 /// GitHub's Write / Preview tabs: the active one is white and joins the box.
 fn composer_tab(ui: &mut Ui, p: &Palette, label: &str, active: bool) -> egui::Response {
-    let font = if active { theme::bold(14.0) } else { theme::body(14.0) };
+    let font = if active { theme::bold(theme::TEXT_BODY) } else { theme::body(theme::TEXT_BODY) };
     let g = ui.painter().layout_no_wrap(label.to_string(), font, if active { p.fg } else { p.fg_muted });
     let (rect, resp) = ui.allocate_exact_size(vec2(g.size().x + 32.0, 36.0), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, label));
@@ -2103,7 +2119,7 @@ fn composer_tab(ui: &mut Ui, p: &Palette, label: &str, active: bool) -> egui::Re
 }
 
 fn toolbar_button(ui: &mut Ui, p: &Palette, f: Format) -> egui::Response {
-    let (rect, resp) = ui.allocate_exact_size(vec2(28.0, 28.0), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(vec2(theme::CONTROL_H, theme::CONTROL_H), Sense::click());
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, f.tip()));
     if resp.hovered() {
         ui.painter().rect_filled(rect, 6.0, p.border.gamma_multiply(0.4));
@@ -2130,11 +2146,11 @@ fn toolbar_button(ui: &mut Ui, p: &Palette, f: Format) -> egui::Response {
         }
         _ => {
             let (text, font) = match f {
-                Format::Heading => ("H", theme::bold(14.0)),
-                Format::Bold => ("B", theme::bold(14.0)),
-                Format::Italic => ("I", theme::body(14.0)),
+                Format::Heading => ("H", theme::bold(theme::TEXT_BODY)),
+                Format::Bold => ("B", theme::bold(theme::TEXT_BODY)),
+                Format::Italic => ("I", theme::body(theme::TEXT_BODY)),
                 Format::Quote => ("❝", theme::body(15.0)),
-                _ => ("<>", theme::mono(12.0)),
+                _ => ("<>", theme::mono(theme::TEXT_SMALL)),
             };
             let mut job = egui::text::LayoutJob::single_section(
                 text.into(),
@@ -2227,7 +2243,7 @@ impl Format {
 
 fn sidebar(ui: &mut Ui, p: &Palette, d: &PrDetail) {
     let section = |ui: &mut Ui, title: &str, body: &mut dyn FnMut(&mut Ui)| {
-        ui.label(RichText::new(title).font(theme::bold(14.0)).color(p.fg_muted));
+        ui.label(RichText::new(title).font(theme::bold(theme::TEXT_BODY)).color(p.fg_muted));
         ui.add_space(6.0);
         body(ui);
         ui.add_space(12.0);
@@ -2257,13 +2273,13 @@ fn sidebar(ui: &mut Ui, p: &Palette, d: &PrDetail) {
     }
     section(ui, "Reviewers", &mut |ui| {
         if reviewers.is_empty() {
-            ui.label(RichText::new("No reviews").size(13.0).color(p.fg_muted));
+            ui.label(RichText::new("No reviews").size(theme::TEXT_DENSE).color(p.fg_muted));
         }
         for (login, url, state) in &reviewers {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 super::avatar_of(ui, login, url, 24.0);
-                ui.label(RichText::new(login).font(theme::bold(14.0)).color(p.fg));
+                ui.label(RichText::new(login).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let (icon, color) = match *state {
                         Some("APPROVED") => (Icon::Check, p.open),
@@ -2279,19 +2295,19 @@ fn sidebar(ui: &mut Ui, p: &Palette, d: &PrDetail) {
     });
     section(ui, "Assignees", &mut |ui| {
         if d.assignees.nodes.is_empty() {
-            ui.label(RichText::new("No one assigned").size(13.0).color(p.fg_muted));
+            ui.label(RichText::new("No one assigned").size(theme::TEXT_DENSE).color(p.fg_muted));
         }
         for a in &d.assignees.nodes {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 super::avatar_of(ui, &a.login, &a.avatar_url, 24.0);
-                ui.label(RichText::new(&a.login).font(theme::bold(14.0)).color(p.fg));
+                ui.label(RichText::new(&a.login).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
             });
         }
     });
     section(ui, "Labels", &mut |ui| {
         if d.labels.nodes.is_empty() {
-            ui.label(RichText::new("None yet").size(13.0).color(p.fg_muted));
+            ui.label(RichText::new("None yet").size(theme::TEXT_DENSE).color(p.fg_muted));
         }
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
@@ -2301,7 +2317,7 @@ fn sidebar(ui: &mut Ui, p: &Palette, d: &PrDetail) {
             labels.sort_by_key(|l| l.name.to_lowercase());
             for l in labels {
                 let (bg, fg, border) = theme::label_colors(&l.color, p);
-                pill(ui, &l.name, theme::bold(13.0), bg, fg, border);
+                pill(ui, &l.name, theme::bold(theme::TEXT_DENSE), bg, fg, border);
             }
         });
     });
@@ -2312,13 +2328,14 @@ fn sidebar(ui: &mut Ui, p: &Palette, d: &PrDetail) {
 fn commits(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
     let nodes = &d.commits.nodes;
     if (d.commits.total_count as usize) > nodes.len() {
-        ui.label(RichText::new(format!("Showing the latest {} of {} commits.", nodes.len(), d.commits.total_count)).color(p.fg_muted).size(13.0));
+        ui.label(RichText::new(format!("Showing the latest {} of {} commits.", nodes.len(), d.commits.total_count)).color(p.fg_muted).size(theme::TEXT_DENSE));
         ui.add_space(8.0);
     }
     let repo = &d.repository.name_with_owner;
     // The head commit's status comes from the checks list, where policy-bot
-    // is ignored; GitHub's own rollup would count it.
-    let head_state = (!d.checks.is_empty()).then(|| CheckSummary::of(&d.checks).state());
+    // is ignored; GitHub's own rollup would count it. Its tooltip says which
+    // checks failed, so a red X beside "Ready to merge" explains itself.
+    let head_state = (!d.checks.is_empty()).then(|| (CheckSummary::of(&d.checks).state(), super::checks_tip(&d.checks)));
     // A line runs through the day markers, like GitHub's commit timeline.
     let line_slot = ui.painter().add(egui::Shape::Noop);
     let line_x = ui.min_rect().left() + 8.0;
@@ -2331,33 +2348,23 @@ fn commits(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
             j += 1;
         }
         let head = ui.horizontal(|ui| {
-            let (rect, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+            let (rect, _) = ui.allocate_exact_size(vec2(theme::ICON, theme::ICON), Sense::hover());
             ui.painter().circle_filled(rect.center(), 9.0, p.canvas);
             icons::paint(ui.painter(), rect, Icon::Commit, p.fg_muted);
-            ui.label(RichText::new(format!("Commits on {day}")).size(14.0).color(p.fg_muted));
+            ui.label(RichText::new(format!("Commits on {day}")).size(theme::TEXT_BODY).color(p.fg_muted));
         });
         line_top.get_or_insert(head.response.rect.center().y);
         ui.add_space(8.0);
-        ui.horizontal_top(|ui| {
+        let group = ui.horizontal_top(|ui| {
             ui.add_space(28.0);
             ui.vertical(|ui| {
                 plain_box(ui, |ui| {
                     for (k, n) in nodes[i..j].iter().enumerate() {
                         let c = &n.commit;
+                        let rollup = || c.status_check_rollup.as_ref().map(|r| (r.state.as_str(), rollup_tip(&r.state).to_string()));
                         let is_head = i + k + 1 == nodes.len();
-                        commit_row(
-                            app,
-                            ui,
-                            p,
-                            d,
-                            repo,
-                            c,
-                            if is_head {
-                                head_state.or(c.status_check_rollup.as_ref().map(|r| r.state.as_str()))
-                            } else {
-                                c.status_check_rollup.as_ref().map(|r| r.state.as_str())
-                            },
-                        );
+                        let state = if is_head { head_state.clone().or_else(rollup) } else { rollup() };
+                        commit_row(app, ui, p, repo, c, state);
                         if k + 1 < j - i {
                             row_separator(ui);
                         }
@@ -2365,7 +2372,8 @@ fn commits(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                 });
             });
         });
-        line_bottom = ui.cursor().top();
+        // The box's own bottom, not the cursor (which includes the gap after it).
+        line_bottom = group.response.rect.bottom();
         ui.add_space(16.0);
         i = j;
     }
@@ -2374,27 +2382,68 @@ fn commits(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
     }
 }
 
-fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, _d: &PrDetail, repo: &str, c: &crate::github::Commit, state: Option<&str>) {
+/// What a commit's overall check state means, for its icon's tooltip.
+fn rollup_tip(state: &str) -> &'static str {
+    match state {
+        "SUCCESS" => "All checks passed",
+        "FAILURE" | "ERROR" => "Some checks failed",
+        "PENDING" | "EXPECTED" => "Checks are running",
+        _ => "Checks",
+    }
+}
+
+/// The "⋯" switch that shows a commit's full message. The pill stays
+/// small; its click target is a comfortable control height.
+fn message_expander(ui: &mut Ui, p: &Palette, body_id: egui::Id, body_open: bool) {
+    let (r, _) = ui.allocate_exact_size(vec2(24.0, 16.0), Sense::hover());
+    let hit = Rect::from_center_size(r.center(), vec2(r.width() + 4.0, theme::CONTROL_H - 4.0));
+    let resp = ui.interact(hit, body_id.with("toggle"), Sense::click());
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, body_open, "Show the full message"));
+    // Pressed look while the message is showing.
+    let (bg, fg) = if body_open {
+        (p.accent_subtle, p.accent)
+    } else if resp.hovered() {
+        (p.border, p.fg_muted)
+    } else {
+        (p.border_muted, p.fg_muted)
+    };
+    ui.painter().rect_filled(r, theme::RADIUS_SMALL, bg);
+    icons::paint(ui.painter(), r.shrink2(vec2(5.0, 2.0)), Icon::Kebab, fg);
+    if resp.on_hover_cursor(egui::CursorIcon::PointingHand).tip(if body_open { "Hide the full message" } else { "Show the full message" }).clicked() {
+        ui.ctx().data_mut(|d| d.insert_temp(body_id, !body_open));
+    }
+}
+
+/// `state` is the commit's check state and its tooltip.
+fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, repo: &str, c: &crate::github::Commit, state: Option<(&str, String)>) {
     let open = || Action::OpenCommit(repo.to_string(), c.oid.clone());
     egui::Frame::new().inner_margin(Margin::symmetric(16, 10)).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.horizontal_top(|ui| {
-            let verified = c.signature.as_ref().is_some_and(|s| s.is_valid);
-            let right_w = 150.0 + if verified { 76.0 } else { 0.0 };
-            let w = (ui.available_width() - right_w).max(120.0);
-            let body_id = egui::Id::new(("commit-body", &c.oid));
-            let body_open = ui.ctx().data(|d| d.get_temp::<bool>(body_id)).unwrap_or(false);
-            let has_body = !c.message_body.trim().is_empty();
-            ui.allocate_ui(vec2(w, 0.0), |ui| {
+        let verified = c.signature.as_ref().is_some_and(|s| s.is_valid);
+        // The right-hand group, measured: SHA button, copy, browse, and the
+        // Verified pill. The headline gets everything else.
+        let gap = 4.0;
+        let sha = ui.painter().layout_no_wrap(c.abbreviated_oid.clone(), sha_font(), p.fg_muted);
+        let sha_w = sha.size().x + 20.0;
+        let verified_w =
+            if verified { ui.painter().layout_no_wrap("Verified".into(), theme::bold(theme::TEXT_SMALL), p.open).size().x + 14.0 + gap * 2.0 } else { 0.0 };
+        let right_w = sha_w + gap + theme::CONTROL_H + gap + theme::CONTROL_H + verified_w;
+        let w = (ui.available_width() - right_w - 16.0).max(120.0);
+        let body_id = egui::Id::new(("commit-body", &c.oid));
+        let body_open = ui.ctx().data(|d| d.get_temp::<bool>(body_id)).unwrap_or(false);
+        let has_body = !c.message_body.trim().is_empty();
+        let text = ui
+            .allocate_ui(vec2(w, 0.0), |ui| {
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 4.0;
                     // Rows only as tall as their text, like GitHub's.
                     ui.spacing_mut().interact_size.y = 20.0;
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
-                        let icon_w = if state.is_some() { 22.0 } else { 0.0 } + if has_body { 30.0 } else { 0.0 };
+                        let gap = ui.spacing().item_spacing.x;
+                        let icon_w = if state.is_some() { theme::ICON + gap } else { 0.0 } + if has_body { 24.0 + gap } else { 0.0 };
                         let mut job = egui::text::LayoutJob::default();
-                        super::append_title(&mut job, &c.message_headline, 14.0, true, 0.0, p);
+                        super::append_title(&mut job, &c.message_headline, theme::TEXT_BODY, true, 0.0, p);
                         let (g, cut) = super::cut_job(ui.painter(), job.clone(), w - icon_w);
                         let (rect, resp) = ui.allocate_exact_size(g.size(), Sense::click());
                         let g = if resp.hovered() { super::cut_job(ui.painter(), recolor(job, p.fg, p.accent), w - icon_w).0 } else { g };
@@ -2407,30 +2456,15 @@ fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, _d: &PrDetail, repo: &str
                             app.actions.push(open());
                         }
                         if has_body {
-                            // "⋯" shows the rest of the commit message.
-                            let (r, resp) = ui.allocate_exact_size(vec2(24.0, 16.0), Sense::click());
-                            // Pressed look while the message is showing.
-                            let (bg, fg) = if body_open {
-                                (p.accent_subtle, p.accent)
-                            } else if resp.hovered() {
-                                (p.border, p.fg_muted)
-                            } else {
-                                (p.border_muted, p.fg_muted)
-                            };
-                            ui.painter().rect_filled(r, 4.0, bg);
-                            icons::paint(ui.painter(), r.shrink2(vec2(5.0, 2.0)), Icon::Kebab, fg);
-                            if resp.tip(if body_open { "Hide the full message" } else { "Show the full message" }).clicked() {
-                                ui.ctx().data_mut(|d| d.insert_temp(body_id, !body_open));
-                            }
+                            message_expander(ui, p, body_id, body_open);
                         }
-                        if let Some(state) = state {
-                            let (icon, color) = status_icon(state, p);
-                            icons::show(ui, icon, 16.0, color);
+                        if let Some((state, tip)) = &state {
+                            super::status_icon_tip(ui, state, theme::ICON, tip, p);
                         }
                     });
                     if has_body && body_open {
                         egui::Frame::new().inner_margin(Margin::symmetric(0, 4)).show(ui, |ui| {
-                            ui.label(RichText::new(c.message_body.trim()).font(theme::mono(12.0)).color(p.fg_muted));
+                            ui.label(RichText::new(c.message_body.trim()).font(theme::mono(theme::TEXT_SMALL)).color(p.fg_muted));
                         });
                     }
                     ui.horizontal(|ui| {
@@ -2438,40 +2472,39 @@ fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, _d: &PrDetail, repo: &str
                         let user = c.author.as_ref().and_then(|a| a.user.as_ref());
                         super::avatar_of(ui, user.map(|u| u.login.as_str()).unwrap_or(""), user.map(|u| u.avatar_url.as_str()).unwrap_or(""), 16.0);
                         let name = user.map(|u| u.login.clone()).or_else(|| c.author.as_ref().and_then(|a| a.name.clone())).unwrap_or_default();
-                        ui.label(RichText::new(name).font(theme::bold(12.0)).color(p.fg));
-                        ui.label(RichText::new(format!("committed {}", util::ago(&c.committed_date))).size(12.0).color(p.fg_muted));
+                        ui.label(RichText::new(name).font(theme::bold(theme::TEXT_SMALL)).color(p.fg));
+                        ui.label(RichText::new(format!("committed {}", util::ago(&c.committed_date))).size(theme::TEXT_SMALL).color(p.fg_muted));
                     });
                 });
-            });
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                // Right to left: browse <>, copy, then the SHA, like GitHub.
-                if icon_button(ui, Icon::Code, "Browse the repository at this point", p).clicked() {
-                    app.actions.push(Action::OpenUrl(format!("https://github.com/{repo}/tree/{}", c.oid)));
-                }
-                if icon_button(ui, Icon::Copy, "Copy full SHA", p).clicked() {
-                    app.actions.push(Action::Copy(c.oid.clone()));
-                }
-                // Painted, so the monospace SHA sits dead center.
-                let g = ui.painter().layout_no_wrap(c.abbreviated_oid.clone(), theme::mono(12.0), p.fg_muted);
-                let (r, resp) = ui.allocate_exact_size(vec2(g.size().x + 20.0, 32.0), Sense::click());
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &c.abbreviated_oid));
-                let fill = if resp.hovered() { ui.visuals().widgets.hovered.weak_bg_fill } else { p.btn_bg };
-                ui.painter().rect(r, 6.0, fill, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
-                ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, &c.abbreviated_oid, theme::mono(12.0), p.fg_muted);
-                super::tip(&resp, "View commit details");
-                if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                    app.actions.push(open());
-                }
-                if verified {
-                    ui.add_space(4.0);
-                    ui.allocate_ui_with_layout(vec2(70.0, 32.0), egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        pill(ui, "Verified", theme::bold(12.0), Color32::TRANSPARENT, p.open, p.open.gamma_multiply(0.6))
-                            .tip("This commit was signed with a verified signature.");
-                    });
-                }
-            });
-        });
+            })
+            .response
+            .rect;
+        // The group sits centered on the text beside it.
+        let row = Rect::from_x_y_ranges(text.right()..=ui.max_rect().right(), text.y_range());
+        let mut right = ui.new_child(egui::UiBuilder::new().max_rect(row).layout(egui::Layout::right_to_left(egui::Align::Center)));
+        let ui = &mut right;
+        ui.spacing_mut().item_spacing.x = gap;
+        // Right to left: browse <>, copy, then the SHA, like GitHub.
+        if icon_button(ui, Icon::Code, "Browse the repository at this point", p).clicked() {
+            app.actions.push(Action::OpenUrl(format!("https://github.com/{repo}/tree/{}", c.oid)));
+        }
+        if icon_button(ui, Icon::Copy, "Copy full SHA", p).clicked() {
+            app.actions.push(Action::Copy(c.oid.clone()));
+        }
+        // Painted, so the monospace SHA sits dead center.
+        let (r, resp) = ui.allocate_exact_size(vec2(sha_w, theme::CONTROL_H), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &c.abbreviated_oid));
+        ui.painter().rect(r, theme::RADIUS, super::button_fill(&resp, p.btn_bg, p), Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
+        ui.painter().galley(r.center() - sha.size() / 2.0, sha, p.fg_muted);
+        super::tip(&resp, "View commit details");
+        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            app.actions.push(open());
+        }
+        if verified {
+            ui.add_space(gap);
+            pill(ui, "Verified", theme::bold(theme::TEXT_SMALL), Color32::TRANSPARENT, p.open, p.open.gamma_multiply(0.6))
+                .tip("This commit was signed with a verified signature.");
+        }
     });
 }
 
@@ -2497,15 +2530,36 @@ fn check_note(c: &Check) -> String {
     }
 }
 
+/// Height of a check row, and of the "N skipped checks" fold.
+const CHECK_ROW_H: f32 = 40.0;
+/// A check row's left padding, and the app picture's size.
+const CHECK_PAD: f32 = 16.0;
+const CHECK_AVATAR: f32 = 20.0;
+/// Gap between a check row's columns.
+const CHECK_GAP: f32 = 8.0;
+
+/// Where a check row's text starts: after the status icon and the app's picture.
+fn check_text_x() -> f32 {
+    CHECK_PAD + theme::ICON + CHECK_GAP + CHECK_AVATAR + CHECK_GAP
+}
+
+/// Widths every check row shares, so the status notes and the right-hand
+/// parts line up in columns.
+struct CheckCols {
+    note_w: f32,
+    required_w: f32,
+    details_w: f32,
+}
+
 fn checks(app: &mut App, ui: &mut Ui, p: &Palette, checks: &[Check]) {
     if checks.is_empty() {
-        egui::Frame::new().stroke(Stroke::new(1.0, p.border)).corner_radius(6).inner_margin(Margin::same(24)).show(ui, |ui| {
+        egui::Frame::new().stroke(Stroke::new(1.0, p.border)).corner_radius(theme::RADIUS).inner_margin(Margin::same(24)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.vertical_centered(|ui| {
                 icons::show(ui, Icon::Checklist, 24.0, p.fg_muted);
                 ui.add_space(8.0);
-                ui.label(RichText::new("No checks").font(theme::bold(16.0)).color(p.fg));
-                ui.label(RichText::new("Nothing reported a status on the latest commit.").size(13.0).color(p.fg_muted));
+                ui.label(RichText::new("No checks").font(theme::bold(theme::TEXT_LARGE)).color(p.fg));
+                ui.label(RichText::new("Nothing reported a status on the latest commit.").size(theme::TEXT_DENSE).color(p.fg_muted));
             });
         });
         return;
@@ -2518,54 +2572,87 @@ fn checks(app: &mut App, ui: &mut Ui, p: &Palette, checks: &[Check]) {
     let skipped_open_id = egui::Id::new("checks-skipped-open");
     let skipped_open = ui.ctx().data(|d| d.get_temp::<bool>(skipped_open_id)).unwrap_or(false);
     let mut toggle_skipped = false;
-    egui::Frame::new().fill(p.canvas).stroke(Stroke::new(1.0, p.border)).corner_radius(6).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.spacing_mut().item_spacing.y = 0.0;
-        egui::Frame::new().inner_margin(Margin::same(16)).show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                let (icon, color, title) = if s.failed > 0 {
-                    (Icon::X, p.closed_emphasis, "Some checks were not successful")
-                } else if s.pending > 0 {
-                    (Icon::Dot, p.attention, "Some checks haven't completed yet")
-                } else {
-                    (Icon::Check, p.open_emphasis, "All checks have passed")
-                };
-                let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
-                ui.painter().circle_filled(rect.center(), 16.0, color);
-                icons::paint(ui.painter(), rect.shrink(8.0), icon, Color32::WHITE);
-                ui.add_space(4.0);
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.label(RichText::new(title).font(theme::bold(16.0)).color(p.fg));
-                    ui.label(RichText::new(s.describe()).size(13.0).color(p.fg_muted));
-                });
+    // The note column is as wide as the widest note, up to a third of the row.
+    let measure = |t: String, f: egui::FontId| ui.painter().layout_no_wrap(t, f, p.fg).size().x;
+    let widest_note = checks.iter().map(|c| measure(check_note(c), theme::body(theme::TEXT_DENSE))).fold(0.0, f32::max);
+    let cols = CheckCols {
+        note_w: widest_note.min(ui.available_width() / 3.0),
+        // A pill's padding is 7 on each side.
+        required_w: if checks.iter().any(|c| c.required) { measure("Required".into(), theme::body(theme::TEXT_SMALL)) + 14.0 } else { 0.0 },
+        details_w: if checks.iter().any(|c| c.url.is_some()) { measure("Details".into(), theme::body(theme::TEXT_DENSE)) } else { 0.0 },
+    };
+    let (icon, color, title) = if s.failed > 0 {
+        (Icon::X, p.closed_emphasis, "Some checks were not successful")
+    } else if s.pending > 0 {
+        (Icon::Dot, p.attention, "Some checks haven't completed yet")
+    } else {
+        (Icon::Check, p.open_emphasis, "All checks have passed")
+    };
+    // The summary is the box's header strip; the rows are its body, edge to edge.
+    let header = |ui: &mut Ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let (rect, _) = ui.allocate_exact_size(vec2(32.0, 32.0), Sense::hover());
+            ui.painter().circle_filled(rect.center(), 16.0, color);
+            icons::paint(ui.painter(), rect.shrink(8.0), icon, p.fg_on_emphasis);
+            // The title starts where the check names do.
+            ui.add_space(check_text_x() - CHECK_PAD - 32.0);
+            ui.vertical(|ui| {
+                ui.spacing_mut().item_spacing.y = 2.0;
+                ui.label(RichText::new(title).font(theme::bold(theme::TEXT_LARGE)).color(p.fg));
+                ui.label(RichText::new(s.describe()).size(theme::TEXT_DENSE).color(p.fg_muted));
             });
         });
-        for c in &shown {
-            row_separator(ui);
-            check_row(app, ui, p, c);
+    };
+    egui::Frame::new().fill(p.canvas).stroke(Stroke::new(1.0, p.border)).corner_radius(theme::RADIUS).show(ui, |ui| {
+        ui.set_width(ui.available_width());
+        ui.spacing_mut().item_spacing.y = 0.0;
+        // Same strip as `boxed`, whose body has padding these rows can't have.
+        egui::Frame::new()
+            .fill(p.canvas_subtle)
+            .corner_radius(CornerRadius { nw: theme::RADIUS, ne: theme::RADIUS, sw: 0, se: 0 })
+            .inner_margin(Margin::symmetric(16, 8))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                header(ui);
+            });
+        let r = ui.available_rect_before_wrap();
+        ui.painter().line_segment([r.left_top(), r.right_top()], Stroke::new(1.0, p.border));
+        for (k, c) in shown.iter().enumerate() {
+            if k > 0 {
+                row_separator(ui);
+            }
+            check_row(app, ui, p, c, &cols);
         }
         // The fold opens downward, so its rows appear under where you clicked.
         if !skipped.is_empty() {
-            row_separator(ui);
+            if !shown.is_empty() {
+                row_separator(ui);
+            }
             let n = skipped.len();
             let label = format!("{n} skipped check{}", if n == 1 { "" } else { "s" });
-            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
+            let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), CHECK_ROW_H), Sense::click());
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
             if resp.hovered() {
-                let r = if skipped_open { 0 } else { 6 };
+                let r = if skipped_open { 0 } else { theme::RADIUS };
                 ui.painter().rect_filled(rect, CornerRadius { nw: 0, ne: 0, sw: r, se: r }, p.hover_row);
             }
             let chevron = if skipped_open { Icon::ChevronDown } else { Icon::ChevronRight };
-            icons::paint(ui.painter(), Rect::from_min_size(pos2(rect.left() + 16.0, rect.center().y - 8.0), vec2(16.0, 16.0)), chevron, p.fg_muted);
-            icons::paint(ui.painter(), Rect::from_min_size(pos2(rect.left() + 40.0, rect.center().y - 8.0), vec2(16.0, 16.0)), Icon::Skip, p.fg_muted);
-            ui.painter().text(pos2(rect.left() + 64.0, rect.center().y), egui::Align2::LEFT_CENTER, label, theme::body(13.0), p.fg_muted);
+            let icon_at = |x: f32| Rect::from_min_size(pos2(rect.left() + x, rect.center().y - theme::ICON / 2.0), vec2(theme::ICON, theme::ICON));
+            icons::paint(ui.painter(), icon_at(CHECK_PAD), chevron, p.fg_muted);
+            icons::paint(ui.painter(), icon_at(CHECK_PAD + theme::ICON + CHECK_GAP), Icon::Skip, p.fg_muted);
+            ui.painter().text(
+                pos2(rect.left() + check_text_x(), rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                label,
+                theme::body(theme::TEXT_DENSE),
+                p.fg_muted,
+            );
             toggle_skipped = resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked();
             if skipped_open {
                 for c in &skipped {
                     row_separator(ui);
-                    check_row(app, ui, p, c);
+                    check_row(app, ui, p, c, &cols);
                 }
             }
         }
@@ -2575,95 +2662,104 @@ fn checks(app: &mut App, ui: &mut Ui, p: &Palette, checks: &[Check]) {
     }
 }
 
-fn check_row(app: &mut App, ui: &mut Ui, p: &Palette, c: &Check) {
-    // The hover tint goes under the row, so it's reserved before drawing.
-    let slot = ui.painter().add(egui::Shape::Noop);
-    let r = egui::Frame::new()
-        .inner_margin(Margin::symmetric(16, 8))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                ui.set_min_height(24.0);
-                ui.spacing_mut().item_spacing.x = 8.0;
-                let (icon, color) = status_icon(&c.result, p);
-                icons::show(ui, icon, 16.0, color);
-                // Skipped checks step back a little: a faded picture, like GitHub.
-                let skipped = check_rank(&c.result) >= 3;
-                let name_color = p.fg;
-                // The app's picture (Actions, CircleCI, ...).
-                let (rect, _) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::hover());
-                match c.avatar.as_deref().filter(|u| !u.is_empty()) {
-                    Some(url) => {
-                        let tint = if skipped { Color32::from_white_alpha(110) } else { Color32::WHITE };
-                        egui::Image::new(url).corner_radius(6.0).tint(tint).show_loading_spinner(false).paint_at(ui, rect);
-                    }
-                    None => {
-                        ui.painter().rect_filled(rect, 6.0, p.canvas_subtle);
-                        icons::paint(ui.painter(), rect.shrink(3.0), Icon::Checklist, p.fg_muted);
-                    }
-                }
-                let details_w = if c.url.is_some() { 60.0 } else { 0.0 };
-                let req_w = if c.required { 72.0 } else { 0.0 };
-                let max = (ui.available_width() - details_w - req_w).max(80.0);
-                let mut job = egui::text::LayoutJob::default();
-                let name = match &c.group {
-                    Some(g) => format!("{g} / {}", c.name),
-                    None => c.name.clone(),
-                };
-                job.append(&name, 0.0, egui::TextFormat { font_id: theme::bold(13.0), color: name_color, ..Default::default() });
-                // "(pull_request)" only if it fits whole; it's the first thing to go.
-                if let Some(e) = &c.event {
-                    let need = ui.painter().layout_no_wrap(format!("{name} ({e})"), theme::bold(13.0), p.fg).size().x;
-                    let room = max - ui.painter().layout_no_wrap(check_note(c), theme::body(13.0), p.fg_muted).size().x - 8.0;
-                    if need <= room {
-                        job.append(&format!("({e})"), 4.0, egui::TextFormat { font_id: theme::body(13.0), color: p.fg_muted, ..Default::default() });
-                    }
-                }
-                // The status ("Failing after 7m") matters more, so the name is cut first.
-                let note = check_note(c);
-                let note_w = ui.painter().layout_no_wrap(note.clone(), theme::body(13.0), p.fg_muted).size().x;
-                // ...but the name keeps at least 60% of the row.
-                let name_max = (max - note_w - 8.0).max(max * 0.6).max(80.0);
-                job.wrap = egui::text::TextWrapping::truncate_at_width(name_max);
-                let g = ui.painter().layout_job(job);
-                let mut cut = g.elided;
-                let (r, resp) = ui.allocate_exact_size(g.size(), Sense::hover());
-                ui.painter().galley(r.min, g, p.fg);
-                let mut note_resp = None;
-                if !note.is_empty() {
-                    let mut job = egui::text::LayoutJob::single_section(
-                        note.clone(),
-                        egui::TextFormat { font_id: theme::body(13.0), color: p.fg_muted, ..Default::default() },
-                    );
-                    job.wrap = egui::text::TextWrapping::truncate_at_width((max - r.width() - 8.0).max(40.0));
-                    let g = ui.painter().layout_job(job);
-                    cut |= g.elided;
-                    let (r, nr) = ui.allocate_exact_size(g.size(), Sense::hover());
-                    ui.painter().galley(r.min, g, p.fg_muted);
-                    note_resp = Some(nr);
-                }
-                // The whole text, but only when some of it was cut.
-                if cut {
-                    resp.tip(format!("{name}\n{note}"));
-                    if let Some(nr) = note_resp {
-                        nr.tip(format!("{name}\n{note}"));
-                    }
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if let Some(u) = &c.url
-                        && link(ui, "Details", 13.0, p).clicked()
-                    {
-                        app.actions.push(Action::OpenUrl(u.clone()));
-                    }
-                    if c.required {
-                        pill(ui, "Required", theme::body(12.0), Color32::TRANSPARENT, p.fg_muted, p.border);
-                    }
-                });
-            });
-        })
-        .response;
-    if r.hovered() {
-        ui.painter().set(slot, egui::Shape::rect_filled(r.rect, 0.0, p.hover_row));
+/// One check: status, app, name, then the status note, "Required" and
+/// "Details" in shared columns. The whole row opens the check's page.
+fn check_row(app: &mut App, ui: &mut Ui, p: &Palette, c: &Check, cols: &CheckCols) {
+    let sense = if c.url.is_some() { Sense::click() } else { Sense::hover() };
+    // Claimed first, so the name's tooltip (drawn on top) still shows.
+    let (rect, row) = ui.allocate_exact_size(vec2(ui.available_width(), CHECK_ROW_H), sense);
+    if c.url.is_some() {
+        row.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Link, true, "Details"));
+    }
+    let hovered = row.hovered();
+    if hovered {
+        ui.painter().rect_filled(rect, 0.0, p.hover_row);
+    }
+    let inner = Rect::from_x_y_ranges(rect.left() + CHECK_PAD..=rect.right() - CHECK_PAD, rect.y_range());
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let ui = &mut child;
+    ui.spacing_mut().item_spacing.x = CHECK_GAP;
+    let (icon, color) = status_icon(&c.result, p);
+    icons::show(ui, icon, theme::ICON, color);
+    // Skipped checks step back a little: a faded picture, like GitHub.
+    let skipped = check_rank(&c.result) >= 3;
+    // The app's picture (Actions, CircleCI, ...).
+    let (pic, _) = ui.allocate_exact_size(vec2(CHECK_AVATAR, CHECK_AVATAR), Sense::hover());
+    match c.avatar.as_deref().filter(|u| !u.is_empty()) {
+        Some(url) => {
+            // An image tint, not a text color: white leaves it as is.
+            let tint = if skipped { Color32::from_white_alpha(110) } else { Color32::WHITE };
+            egui::Image::new(url).corner_radius(theme::RADIUS).tint(tint).show_loading_spinner(false).paint_at(ui, pic);
+        }
+        None => {
+            ui.painter().rect_filled(pic, theme::RADIUS, p.canvas_subtle);
+            icons::paint(ui.painter(), pic.shrink(3.0), Icon::Checklist, p.fg_muted);
+        }
+    }
+    // Right-hand columns, from the right edge in.
+    let details_x = inner.right() - cols.details_w;
+    let required_x = details_x - if cols.details_w > 0.0 { 12.0 } else { 0.0 } - cols.required_w;
+    let note_x = required_x - if cols.required_w > 0.0 { 16.0 } else { 0.0 } - cols.note_w;
+    let name_x = ui.cursor().left();
+    let name_max = (note_x - 16.0 - name_x).max(80.0);
+    let name = match &c.group {
+        Some(g) => format!("{g} / {}", c.name),
+        None => c.name.clone(),
+    };
+    let mut job = egui::text::LayoutJob::default();
+    job.append(&name, 0.0, egui::TextFormat { font_id: theme::bold(theme::TEXT_DENSE), color: p.fg, ..Default::default() });
+    // "(pull_request)" only if it fits whole; it's the first thing to go.
+    if let Some(e) = &c.event {
+        let need = ui.painter().layout_no_wrap(format!("{name} ({e})"), theme::bold(theme::TEXT_DENSE), p.fg).size().x;
+        if need <= name_max {
+            job.append(&format!("({e})"), 4.0, egui::TextFormat { font_id: theme::body(theme::TEXT_DENSE), color: p.fg_muted, ..Default::default() });
+        }
+    }
+    job.wrap = egui::text::TextWrapping::truncate_at_width(name_max);
+    let g = ui.painter().layout_job(job);
+    let mut cut = g.elided;
+    let (r, name_resp) = ui.allocate_exact_size(g.size(), Sense::hover());
+    ui.painter().galley(r.min, g, p.fg);
+    // The status ("Failing after 7m") in its own column, so durations line up.
+    let note = check_note(c);
+    let mut note_resp = None;
+    if !note.is_empty() {
+        let mut job = egui::text::LayoutJob::single_section(
+            note.clone(),
+            egui::TextFormat { font_id: theme::body(theme::TEXT_DENSE), color: p.fg_muted, ..Default::default() },
+        );
+        job.wrap = egui::text::TextWrapping::truncate_at_width(cols.note_w.max(40.0));
+        let g = ui.painter().layout_job(job);
+        cut |= g.elided;
+        let at = pos2(note_x.max(r.right() + 16.0), inner.center().y - g.size().y / 2.0);
+        let nr = Rect::from_min_size(at, g.size());
+        ui.painter().galley(nr.min, g, p.fg_muted);
+        note_resp = Some(ui.interact(nr, ui.id().with(("check-note", &c.name)), Sense::hover()));
+    }
+    // The whole text, but only when some of it was cut.
+    if cut {
+        name_resp.tip(format!("{name}\n{note}"));
+        if let Some(nr) = note_resp {
+            nr.tip(format!("{name}\n{note}"));
+        }
+    }
+    if c.required {
+        let mut req = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(Rect::from_x_y_ranges(required_x..=required_x + cols.required_w, inner.y_range()))
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        pill(&mut req, "Required", theme::body(theme::TEXT_SMALL), Color32::TRANSPARENT, p.fg_muted, p.border);
+    }
+    // "Details" looks like a link; the row is what you click.
+    if let Some(u) = &c.url {
+        let underline = if hovered { Stroke::new(1.0, p.accent) } else { Stroke::NONE };
+        let format = egui::TextFormat { font_id: theme::body(theme::TEXT_DENSE), color: p.accent, underline, ..Default::default() };
+        let g = ui.painter().layout_job(egui::text::LayoutJob::single_section("Details".into(), format));
+        ui.painter().galley(pos2(details_x, inner.center().y - g.size().y / 2.0), g, p.accent);
+        if row.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            app.actions.push(Action::OpenUrl(u.clone()));
+        }
     }
 }
 
@@ -2679,7 +2775,7 @@ fn commit_page(app: &mut App, ui: &mut Ui, p: &Palette, page: &CommitPage, d: Op
         ui.set_max_width(full - 14.0);
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            if link_styled(ui, "← Back to pull request", theme::body(13.0), p.accent).tip("Back (Esc)").clicked() {
+            if link_styled(ui, "← Back to pull request", theme::body(theme::TEXT_DENSE), p.accent).tip("Back (Esc)").clicked() {
                 app.actions.push(Action::CloseCommit);
             }
             // Prev / Next walk the PR's commits, like GitHub's commit pages.
@@ -2696,7 +2792,7 @@ fn commit_page(app: &mut App, ui: &mut Ui, p: &Palette, page: &CommitPage, d: Op
                         app.actions.push(Action::OpenCommit(page.repo.clone(), prev.unwrap_or_default()));
                     }
                     ui.add_space(8.0);
-                    ui.label(RichText::new(format!("Commit {} of {}", i + 1, nodes.len())).size(13.0).color(p.fg_muted));
+                    ui.label(RichText::new(format!("Commit {} of {}", i + 1, nodes.len())).size(theme::TEXT_DENSE).color(p.fg_muted));
                 });
             }
         });
@@ -2743,30 +2839,18 @@ fn commit_box(app: &mut App, ui: &mut Ui, p: &Palette, c: &CommitDetail, page: &
                             ui.spacing_mut().item_spacing.x = 6.0;
                             let mut job = egui::text::LayoutJob::default();
                             job.wrap.max_width = w - if has_body { 30.0 } else { 0.0 };
-                            super::append_title(&mut job, c.headline(), 16.0, true, 0.0, p);
+                            super::append_title(&mut job, c.headline(), theme::TEXT_LARGE, true, 0.0, p);
                             let g = ui.painter().layout_job(job);
                             let (r, _) = ui.allocate_exact_size(g.size(), Sense::hover());
                             ui.painter().galley(r.min, g, p.fg);
                             if has_body {
                                 // "⋯" shows the rest of the message; remembered
                                 // from the Commits tab, which uses the same switch.
-                                let (r, resp) = ui.allocate_exact_size(vec2(24.0, 16.0), Sense::click());
-                                let (bg, fg) = if body_open {
-                                    (p.accent_subtle, p.accent)
-                                } else if resp.hovered() {
-                                    (p.border, p.fg_muted)
-                                } else {
-                                    (p.border_muted, p.fg_muted)
-                                };
-                                ui.painter().rect_filled(r, 4.0, bg);
-                                icons::paint(ui.painter(), r.shrink2(vec2(5.0, 2.0)), Icon::Kebab, fg);
-                                if resp.tip(if body_open { "Hide the full message" } else { "Show the full message" }).clicked() {
-                                    ui.ctx().data_mut(|d| d.insert_temp(body_id, !body_open));
-                                }
+                                message_expander(ui, p, body_id, body_open);
                             }
                         });
                         if has_body && body_open {
-                            ui.label(RichText::new(body).font(theme::mono(12.0)).color(p.fg_muted));
+                            ui.label(RichText::new(body).font(theme::mono(theme::TEXT_SMALL)).color(p.fg_muted));
                         }
                     });
                 });
@@ -2787,7 +2871,7 @@ fn commit_box(app: &mut App, ui: &mut Ui, p: &Palette, c: &CommitDetail, page: &
                     let login = who.map(|a| a.login.as_str()).unwrap_or("");
                     let name = who.map(|a| a.login.clone()).or_else(|| git.and_then(|g| g.name.clone())).unwrap_or_else(|| "Someone".into());
                     super::avatar_of(ui, login, who.map(|a| a.avatar_url.as_str()).unwrap_or(""), 20.0);
-                    ui.label(RichText::new(name).font(theme::bold(14.0)).color(p.fg));
+                    ui.label(RichText::new(name).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
                 };
                 let author = c.commit.author.as_ref();
                 let committer = c.commit.committer.as_ref();
@@ -2806,7 +2890,7 @@ fn commit_box(app: &mut App, ui: &mut Ui, p: &Palette, c: &CommitDetail, page: &
                 ui.label(RichText::new(format!("committed {}", util::ago(when))).color(p.fg_muted));
                 if c.commit.verification.as_ref().is_some_and(|v| v.verified) {
                     ui.add_space(4.0);
-                    pill(ui, "Verified", theme::bold(12.0), Color32::TRANSPARENT, p.open, p.open.gamma_multiply(0.6))
+                    pill(ui, "Verified", theme::bold(theme::TEXT_SMALL), Color32::TRANSPARENT, p.open, p.open.gamma_multiply(0.6))
                         .tip("This commit was signed with a verified signature.");
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -2817,18 +2901,19 @@ fn commit_box(app: &mut App, ui: &mut Ui, p: &Palette, c: &CommitDetail, page: &
                     }
                     let full = ui.available_width() > 560.0;
                     let sha = if full { c.sha.as_str() } else { c.short_sha() };
-                    ui.label(RichText::new(sha).font(theme::mono(12.0)).color(p.fg_muted)).tip(&c.sha);
-                    ui.label(RichText::new("commit").size(12.0).color(p.fg_muted));
+                    // This commit: the same SHA look, but not a link to itself.
+                    ui.label(RichText::new(sha).font(sha_font()).color(p.fg_muted)).tip(&c.sha);
+                    ui.label(RichText::new("commit").size(theme::TEXT_SMALL).color(p.fg_muted));
                     if !c.parents.is_empty() {
                         ui.add_space(8.0);
                         for parent in c.parents.iter().rev() {
                             let short = &parent.sha[..parent.sha.len().min(7)];
-                            if link_styled(ui, short, theme::mono(12.0), p.accent).tip(&parent.sha).clicked() {
+                            if sha_text(ui, p, short, &parent.sha).clicked() {
                                 app.actions.push(Action::OpenCommit(page.repo.clone(), parent.sha.clone()));
                             }
                         }
                         let n = c.parents.len();
-                        ui.label(RichText::new(format!("{n} parent{}", if n == 1 { "" } else { "s" })).size(12.0).color(p.fg_muted));
+                        ui.label(RichText::new(format!("{n} parent{}", if n == 1 { "" } else { "s" })).size(theme::TEXT_SMALL).color(p.fg_muted));
                     }
                 });
             });

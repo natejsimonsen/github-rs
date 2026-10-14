@@ -14,7 +14,11 @@ const HEADER_H: f32 = 44.0;
 const LINE_H: f32 = 20.0;
 const NOTE_H: f32 = 40.0;
 const GAP_H: f32 = 16.0;
-const FOOT_H: f32 = 7.0;
+/// The rounded bottom of a file's box: just the corner, filled like the
+/// row above it.
+const FOOT_H: f32 = theme::RADIUS as f32;
+/// Expander rows are buttons, so they get a control's height.
+const EXPAND_H: f32 = theme::CONTROL_H;
 const NUM_W: f32 = 52.0;
 const MAX_LINES: usize = 60_000;
 /// Lines shown per click on an expander, like GitHub.
@@ -38,8 +42,7 @@ enum Row {
         text: String,
     },
     Note(String),
-    /// The rounded bottom edge of a file's box. The file's sideways
-    /// scrollbar lives here.
+    /// The rounded bottom edge of a file's box.
     Foot,
     Gap,
     /// A hunk header (or the end of the file) with hidden lines next to it.
@@ -61,8 +64,7 @@ impl Row {
             Row::Note(_) => NOTE_H,
             Row::Gap => GAP_H,
             Row::Foot => FOOT_H,
-            Row::Expander { kind: Expand::UpDown, .. } => LINE_H * 2.0,
-            Row::Expander { .. } => LINE_H,
+            Row::Expander { .. } => EXPAND_H,
         }
     }
 }
@@ -212,8 +214,9 @@ fn highlight_rows(rows: &[Row], row_file: &[usize], files: &[FileDiff]) -> Vec<O
 }
 
 /// Which way an expander shows hidden lines, like GitHub's: up from the
-/// hunk below, down from the hunk above, both (two buttons, when more than
-/// 20 are hidden between hunks), or all at once (20 or fewer).
+/// hunk below, down from the hunk above, both (two buttons side by side in
+/// one row, when more than 20 are hidden between hunks), or all at once (20
+/// or fewer).
 #[derive(Clone, Copy, PartialEq)]
 pub enum Expand {
     Up,
@@ -263,10 +266,7 @@ pub fn build(files: Arc<Vec<FileDiff>>, is_collapsed: impl Fn(&FileDiff) -> bool
                 for raw in patch.lines() {
                     lines += 1;
                     let text = raw.replace('\t', "    ");
-                    // Hunk headers are cut with "…", so they never need scrolling.
-                    if !raw.starts_with("@@") {
-                        file_chars[i] = file_chars[i].max(text.chars().count());
-                    }
+                    file_chars[i] = file_chars[i].max(text.chars().count());
                     let row = if raw.starts_with("@@") {
                         (old, new) = hunk_start(raw);
                         let gap = new.saturating_sub(last_new + 1);
@@ -281,6 +281,8 @@ pub fn build(files: Arc<Vec<FileDiff>>, is_collapsed: impl Fn(&FileDiff) -> bool
                         }
                         // The header covers the lines shown above it, like GitHub.
                         let text = if up > 0 { shift_hunk_header(&text, up) } else { text };
+                        // The @@ line scrolls sideways with the code.
+                        file_chars[i] = file_chars[i].max(text.chars().count());
                         if can_expand && hidden > 0 {
                             let kind = if hidden <= EXPAND {
                                 Expand::All
@@ -418,9 +420,9 @@ pub fn show(app: &mut App, ui: &mut Ui, pr_id: &str, files: Arc<Vec<FileDiff>>, 
             egui::Frame::new()
                 .fill(p.overlay)
                 .stroke(Stroke::new(1.0, p.border))
-                .corner_radius(8)
+                .corner_radius(theme::RADIUS_OVERLAY)
                 .inner_margin(egui::Margin::same(12))
-                .shadow(egui::Shadow { offset: [0, 8], blur: 24, spread: 0, color: egui::Color32::from_black_alpha(if p.dark { 160 } else { 50 }) })
+                .shadow(theme::overlay_shadow(p))
                 .show(ui, |ui| {
                     ui.set_width(300.0f32.min(width * 0.45));
                     ui.set_height(height - 24.0);
@@ -516,9 +518,12 @@ fn marks_changed_words() {
 /// "Files 38" with the button that hides the tree.
 fn tree_header(ui: &mut Ui, p: &Palette, layout: &Layout, toggle: &mut bool) {
     ui.horizontal(|ui| {
+        // Same height as the summary row beside it, so the filter and the
+        // first file's box line up.
+        ui.set_min_height(theme::CONTROL_H);
         *toggle |= crate::views::icon_button_tip_above(ui, Icon::SidebarLeftClose, "Hide file tree (⇧⌘B)", p).clicked();
-        ui.label(egui::RichText::new("Files").font(theme::bold(14.0)).color(p.fg));
-        ui.label(egui::RichText::new(layout.files.len().to_string()).size(12.0).color(p.fg_muted));
+        ui.label(egui::RichText::new("Files").font(theme::bold(theme::TEXT_BODY)).color(p.fg));
+        ui.label(egui::RichText::new(layout.files.len().to_string()).size(theme::TEXT_SMALL).color(p.fg_muted));
     });
     ui.add_space(8.0);
 }
@@ -570,48 +575,24 @@ impl Dir {
 fn file_tree(ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: egui::Id, pr_id: &str, current: Option<usize>) {
     let filter_id = egui::Id::new(("tree-filter", pr_id));
     let mut filter = ui.ctx().data(|d| d.get_temp::<String>(filter_id)).unwrap_or_default();
-    let focused = ui.memory(|m| m.has_focus(filter_id));
     ui.set_max_width(ui.available_width());
-    egui::Frame::new()
-        .fill(p.canvas)
-        .stroke(if focused { Stroke::new(2.0, p.accent_emphasis) } else { Stroke::new(1.0, p.border) })
-        .corner_radius(6)
-        .inner_margin(egui::Margin::symmetric(8, if focused { 1 } else { 2 }))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                icons::show(ui, Icon::Search, 14.0, p.fg_muted);
-                let clear = !filter.is_empty();
-                ui.add(
-                    egui::TextEdit::singleline(&mut filter)
-                        .id(filter_id)
-                        .hint_text(egui::RichText::new("Filter files…").color(p.fg_muted))
-                        .frame(egui::Frame::NONE)
-                        // Exactly what's left, so the panel never grows to fit it.
-                        .desired_width((ui.available_width() - if clear { 18.0 + ui.spacing().item_spacing.x } else { 0.0 }).max(20.0))
-                        .font(theme::body(13.0)),
-                );
-                if clear {
-                    let (r, x) = ui.allocate_exact_size(vec2(18.0, 18.0), Sense::click());
-                    x.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Clear filter"));
-                    icons::paint(ui.painter(), r.shrink(3.0), Icon::X, if x.hovered() { p.fg } else { p.fg_muted });
-                    if crate::views::Tip::tip(x, "Clear filter").on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                        filter.clear();
-                    }
-                }
-            });
-        });
+    let clearable = !filter.is_empty();
+    let (_, clear) = crate::views::search_input(ui, filter_id, &mut filter, "Filter files…", clearable, "Clear filter", p);
+    if clear {
+        filter.clear();
+    }
     ui.ctx().data_mut(|d| d.insert_temp(filter_id, filter.clone()));
     ui.add_space(8.0);
     let tree = Dir::of(&layout.files, &filter);
     if !filter.trim().is_empty() && !(tree.dirs.is_empty() && tree.files.is_empty()) {
         let n = layout.files.iter().filter(|f| f.filename.to_lowercase().contains(&filter.to_lowercase())).count();
-        ui.label(egui::RichText::new(format!("{n} of {} files", layout.files.len())).size(12.0).color(p.fg_muted));
+        ui.label(egui::RichText::new(format!("{n} of {} files", layout.files.len())).size(theme::TEXT_SMALL).color(p.fg_muted));
         ui.add_space(4.0);
     }
     egui::ScrollArea::vertical().id_salt("tree").auto_shrink([false, false]).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         if tree.dirs.is_empty() && tree.files.is_empty() {
-            ui.label(egui::RichText::new("No files match.").size(13.0).color(p.fg_muted));
+            ui.label(egui::RichText::new("No files match.").size(theme::TEXT_DENSE).color(p.fg_muted));
         }
         tree_dir(ui, p, layout, &tree, 0, "", jump_id, pr_id, current);
     });
@@ -626,7 +607,7 @@ fn tree_dir(ui: &mut Ui, p: &Palette, layout: &Layout, dir: &Dir, depth: usize, 
         let open = ui.ctx().data(|d| d.get_temp::<bool>(open_id)).unwrap_or(true);
         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
         if resp.hovered() {
-            ui.painter().rect_filled(rect, 6.0, p.hover_row);
+            ui.painter().rect_filled(rect, theme::RADIUS, p.hover_row);
         }
         let x = rect.left() + 4.0 + indent;
         let chevron = if open { Icon::ChevronDown } else { Icon::ChevronRight };
@@ -635,9 +616,9 @@ fn tree_dir(ui: &mut Ui, p: &Palette, layout: &Layout, dir: &Dir, depth: usize, 
         icons::paint(ui.painter(), Rect::from_min_size(pos2(x + 16.0, rect.center().y - 7.0), vec2(14.0, 14.0)), folder, p.accent.gamma_multiply(0.8));
         let label_x = x + 36.0;
         // Folder chains lose their start, so the deepest folder stays readable.
-        let shown = crate::views::elide_front(ui.painter(), name, theme::body(13.0), rect.right() - label_x - 4.0);
+        let shown = crate::views::elide_front(ui.painter(), name, theme::body(theme::TEXT_DENSE), rect.right() - label_x - 4.0);
         let cut = shown != *name;
-        ui.painter().text(pos2(label_x, rect.center().y), egui::Align2::LEFT_CENTER, shown, theme::body(13.0), p.fg);
+        ui.painter().text(pos2(label_x, rect.center().y), egui::Align2::LEFT_CENTER, shown, theme::body(theme::TEXT_DENSE), p.fg);
         let resp = if cut { resp.tip(name) } else { resp };
         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
             ui.ctx().data_mut(|d| d.insert_temp(open_id, !open));
@@ -651,18 +632,18 @@ fn tree_dir(ui: &mut Ui, p: &Palette, layout: &Layout, dir: &Dir, depth: usize, 
         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
         let is_current = current == Some(*i);
         if is_current {
-            ui.painter().rect_filled(rect, 6.0, p.border.gamma_multiply(0.35));
+            ui.painter().rect_filled(rect, theme::RADIUS, p.border.gamma_multiply(0.35));
             let bar = Rect::from_min_size(pos2(rect.left(), rect.top() + 4.0), vec2(4.0, rect.height() - 8.0));
-            ui.painter().rect_filled(bar, 6.0, p.accent_emphasis);
+            ui.painter().rect_filled(bar, theme::RADIUS, p.accent_emphasis);
         } else if resp.hovered() {
-            ui.painter().rect_filled(rect, 6.0, p.hover_row);
+            ui.painter().rect_filled(rect, theme::RADIUS, p.hover_row);
         }
         let x = rect.left() + 4.0 + indent + 16.0;
         let (icon, color) = file_icon(f, p);
         icons::paint(ui.painter(), Rect::from_min_size(pos2(x, rect.center().y - 7.0), vec2(14.0, 14.0)), Icon::File, p.fg_muted);
         let name_color = if f.viewed { p.fg_muted } else { p.fg };
         let right = rect.right() - 26.0;
-        let cut = elided(ui.painter(), p, pos2(x + 20.0, rect.center().y), right - x - 24.0, name, theme::body(13.0), name_color);
+        let cut = elided(ui.painter(), p, pos2(x + 20.0, rect.center().y), right - x - 24.0, name, theme::body(theme::TEXT_DENSE), name_color);
         // Status at the right: added, removed, renamed or changed. Viewed files get a check.
         let status = Rect::from_min_size(pos2(rect.right() - 22.0, rect.center().y - 8.0), vec2(16.0, 16.0));
         if f.viewed {
@@ -685,7 +666,8 @@ fn file_icon(f: &FileDiff, p: &Palette) -> (Icon, egui::Color32) {
         "added" => (Icon::FileAdded, p.open),
         "removed" => (Icon::FileRemoved, p.closed),
         "renamed" => (Icon::FileMoved, p.fg_muted),
-        _ => (Icon::FileModified, p.attention),
+        // Most files are changed, so that's the quiet one.
+        _ => (Icon::FileModified, p.border_emphasis),
     }
 }
 
@@ -706,6 +688,7 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
     let (adds, dels) = files.iter().fold((0, 0), |(a, d), f| (a + f.additions, d + f.deletions));
     let viewed = files.iter().filter(|f| f.viewed).count();
     ui.horizontal(|ui| {
+        ui.set_min_height(theme::CONTROL_H);
         // Whenever the tree isn't showing, its button is.
         let shown = if app.tree_narrow { app.tree_open_narrow } else { app.panels.tree };
         if !shown {
@@ -720,8 +703,10 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
         );
         // The summary gives way ("…") before the viewed count does.
         let room = (ui.available_width() - 210.0).max(60.0);
-        let mut job =
-            egui::text::LayoutJob::single_section(summary.clone(), egui::TextFormat { font_id: theme::body(13.0), color: p.fg_muted, ..Default::default() });
+        let mut job = egui::text::LayoutJob::single_section(
+            summary.clone(),
+            egui::TextFormat { font_id: theme::body(theme::TEXT_DENSE), color: p.fg_muted, ..Default::default() },
+        );
         job.wrap = egui::text::TextWrapping::truncate_at_width(room);
         let g = ui.painter().layout_job(job);
         let (r, resp) = ui.allocate_exact_size(g.size(), Sense::hover());
@@ -737,12 +722,12 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
             ui.painter().rect_filled(bar, 4.0, p.border_muted);
             let frac = if files.is_empty() { 0.0 } else { viewed as f32 / files.len() as f32 };
             ui.painter().rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * frac, bar.height())), 4.0, p.open);
-            ui.label(egui::RichText::new(format!("{viewed} / {} files viewed", files.len())).color(p.fg_muted).size(13.0));
+            ui.label(egui::RichText::new(format!("{viewed} / {} files viewed", files.len())).color(p.fg_muted).size(theme::TEXT_DENSE));
         });
     });
     ui.add_space(8.0);
 
-    let char_w = ui.fonts_mut(|f| f.glyph_width(&theme::mono(12.0), 'M'));
+    let char_w = ui.fonts_mut(|f| f.glyph_width(&theme::mono(theme::TEXT_SMALL), 'M'));
     // Salted per PR or commit, so pages don't inherit each other's scroll.
     let mut area = egui::ScrollArea::vertical().id_salt(("diff", current_id)).auto_shrink([false, false]);
     // A PR's diff folds the header like its other tabs; a commit's header is always slim.
@@ -811,19 +796,20 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
                     file_header(app, ui, p, &files[*fi], *fi, r, *collapsed, src);
                 }
                 Row::Line { kind, old, new, text } => {
-                    let (bg, num_bg) = match kind {
-                        Kind::Add => (p.diff_add, p.diff_add_num),
-                        Kind::Del => (p.diff_del, p.diff_del_num),
-                        Kind::Hunk => (p.diff_hunk, p.diff_hunk_num),
-                        _ => (p.canvas, p.canvas),
-                    };
+                    let (bg, num_bg) = row_fills(row, p);
                     painter.rect_filled(r, 0.0, bg);
                     let nums = Rect::from_min_size(r.min, vec2(NUM_W * 2.0, r.height()));
                     painter.rect_filled(nums, 0.0, num_bg);
                     let num_color = if *kind == Kind::Ctx { p.fg_muted.gamma_multiply(0.8) } else { p.fg_muted };
                     for (n, x) in [(old, NUM_W), (new, NUM_W * 2.0)] {
                         if let Some(n) = n {
-                            painter.text(pos2(r.left() + x - 10.0, r.center().y), Align2::RIGHT_CENTER, n.to_string(), theme::mono(12.0), num_color);
+                            painter.text(
+                                pos2(r.left() + x - 10.0, r.center().y),
+                                Align2::RIGHT_CENTER,
+                                n.to_string(),
+                                theme::mono(theme::TEXT_SMALL),
+                                num_color,
+                            );
                         }
                     }
                     let marker = match kind {
@@ -834,13 +820,13 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
                     let code = Rect::from_min_max(pos2(r.left() + code_left, r.top()), pos2(r.right() - 8.0, r.bottom()));
                     let clipped = painter.with_clip_rect(code.intersect(painter.clip_rect()));
                     let tx = code.left() - pans[fi];
-                    clipped.text(pos2(tx, r.center().y), Align2::LEFT_CENTER, marker, theme::mono(12.0), p.fg_muted);
+                    clipped.text(pos2(tx, r.center().y), Align2::LEFT_CENTER, marker, theme::mono(theme::TEXT_SMALL), p.fg_muted);
                     let color = match kind {
                         Kind::Hunk | Kind::Meta => p.fg_muted,
                         _ => p.fg,
                     };
                     let runs = layout.colors[i].as_ref().and_then(|(lines, n)| lines.get(*n)).map(Vec::as_slice);
-                    let g = painter.layout_job(crate::syntax::job(text, runs, theme::mono(12.0), color, p));
+                    let g = painter.layout_job(crate::syntax::job(text, runs, theme::mono(theme::TEXT_SMALL), color, p));
                     let at = pos2(tx + 16.0, r.center().y - g.size().y / 2.0);
                     if let Some(span) = layout.changes[i].as_ref().filter(|s| s.start < s.end) {
                         let x = |b: usize| g.pos_from_cursor(egui::text::CCursor::new(text[..b].chars().count())).left();
@@ -853,7 +839,7 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
                 }
                 Row::Note(msg) => {
                     painter.rect_filled(r, 0.0, p.canvas);
-                    painter.text(r.center(), Align2::CENTER_CENTER, msg, theme::body(13.0), p.fg_muted);
+                    painter.text(r.center(), Align2::CENTER_CENTER, msg, theme::body(theme::TEXT_DENSE), p.fg_muted);
                     side_borders(painter, p, r);
                 }
                 Row::Expander { file, idx, hidden, kind, text } => {
@@ -865,9 +851,9 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
                     let mut buttons: Vec<(Rect, Expand, usize, u32, String)> = Vec::new();
                     match (kind, hidden) {
                         (Expand::UpDown, Some(h)) => {
-                            let (top, bottom) = gutter.split_top_bottom_at_fraction(0.5);
-                            buttons.push((top, Expand::Down, DOWN_KEY + *idx, EXPAND, format!("Expand {} below", lines(EXPAND.min(*h)))));
-                            buttons.push((bottom, Expand::Up, *idx, EXPAND, format!("Expand {} above", lines(EXPAND.min(*h)))));
+                            let (left, right) = gutter.split_left_right_at_fraction(0.5);
+                            buttons.push((left, Expand::Down, DOWN_KEY + *idx, EXPAND, format!("Expand {} below", lines(EXPAND.min(*h)))));
+                            buttons.push((right, Expand::Up, *idx, EXPAND, format!("Expand {} above", lines(EXPAND.min(*h)))));
                         }
                         (Expand::All, Some(h)) => buttons.push((gutter, Expand::All, *idx, *h, format!("Expand all {}", lines(*h)))),
                         (Expand::Up, Some(h)) => buttons.push((gutter, Expand::Up, *idx, EXPAND, format!("Expand {} above", lines(EXPAND.min(*h))))),
@@ -878,7 +864,7 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
                         let resp = ui.interact(area, egui::Id::new(("expand", fi, *idx, n)), Sense::click());
                         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
                         painter.rect_filled(area, 0.0, if resp.hovered() { p.accent_emphasis } else { p.diff_hunk_num });
-                        let color = if resp.hovered() { egui::Color32::WHITE } else { p.fg_muted };
+                        let color = if resp.hovered() { p.fg_on_emphasis } else { p.fg_muted };
                         unfold_arrow(painter, area.center(), arrow, color);
                         let under_header = i > 0 && matches!(layout.rows[i - 1], Row::Header(..));
                         let resp = if under_header { resp.tip_below(&label) } else { resp.tip_above(&label) };
@@ -886,29 +872,35 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
                             app.actions.push(Action::ExpandHunk(path.clone(), key, amount));
                         }
                     }
-                    // With two buttons the text sits on the lower (↑) row, like GitHub.
-                    let text_y = if *kind == Expand::UpDown { r.bottom() - LINE_H / 2.0 } else { r.center().y };
+                    // The @@ line scrolls sideways with the code, so every line
+                    // in a file cuts off the same way.
                     let code = Rect::from_min_max(pos2(r.left() + code_left, r.top()), pos2(r.right() - 8.0, r.bottom()));
-                    // The @@ line stays put and ends in "…" rather than mid-letter.
-                    let mut job = egui::text::LayoutJob::single_section(
-                        text.clone(),
-                        egui::TextFormat { font_id: theme::mono(12.0), color: p.fg_muted, ..Default::default() },
+                    let tx = code.left() - pans[fi] + 16.0;
+                    painter.with_clip_rect(code.intersect(painter.clip_rect())).text(
+                        pos2(tx, r.center().y),
+                        Align2::LEFT_CENTER,
+                        text,
+                        theme::mono(theme::TEXT_SMALL),
+                        p.fg_muted,
                     );
-                    job.wrap = egui::text::TextWrapping::truncate_at_width((code.width() - 16.0).max(20.0));
-                    let g = painter.layout_job(job);
-                    let at = pos2(code.left() + 16.0, text_y - g.size().y / 2.0);
-                    painter.with_clip_rect(code.intersect(painter.clip_rect())).galley(at, g, p.fg_muted);
                     side_borders(painter, p, r);
                 }
                 Row::Foot => {
-                    painter.rect_filled(r, CornerRadius { nw: 0, ne: 0, sw: 6, se: 6 }, p.canvas);
-                    rounded_bottom(painter, r.shrink2(vec2(0.5, 0.0)), 6.0, Stroke::new(1.0, p.border));
+                    // The last row runs on into the rounded corners, so the box
+                    // has no empty strip at the bottom.
+                    let (bg, num_bg) = layout.rows.get(i.wrapping_sub(1)).map_or((p.canvas, p.canvas), |above| row_fills(above, p));
+                    painter.rect_filled(r, CornerRadius { sw: theme::RADIUS, se: theme::RADIUS, ..Default::default() }, bg);
+                    let nums = Rect::from_min_size(r.min, vec2(NUM_W * 2.0, r.height()));
+                    painter.rect_filled(nums, CornerRadius { sw: theme::RADIUS, ..Default::default() }, num_bg);
+                    rounded_bottom(painter, r.shrink2(vec2(0.5, 0.0)), theme::RADIUS as f32, Stroke::new(1.0, p.border));
                 }
                 Row::Gap => {}
             }
         }
 
-        // A thin scrollbar at the bottom of the visible part of each wide file.
+        // A thin scrollbar at the bottom of the visible part of each wide
+        // file. It floats over the last row, so it only shows while the
+        // pointer is on that file.
         for (fi, &file_bottom) in layout.file_bottoms.iter().enumerate().take(files.len()) {
             let max = (file_w(fi) - code_w).max(0.0);
             if max <= 0.0 {
@@ -918,26 +910,22 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
             if bottom < viewport.min.y || top > viewport.max.y || bottom - top < 30.0 {
                 continue;
             }
-            let y = if bottom - FOOT_H <= viewport.max.y { bottom - FOOT_H + 1.0 } else { viewport.max.y - 8.0 };
+            let y = if bottom - FOOT_H <= viewport.max.y { bottom - 7.0 } else { viewport.max.y - 8.0 };
             let track = Rect::from_min_size(pos2(origin.x + code_left, origin.y + y), vec2(code_w, 5.0));
             let thumb_w = (code_w * code_w / file_w(fi)).max(30.0);
             let thumb_x = track.left() + (track.width() - thumb_w) * (pans[fi] / max);
             let thumb = Rect::from_min_size(pos2(thumb_x, track.top()), vec2(thumb_w, 5.0));
             let resp = ui.interact(track.expand(3.0), egui::Id::new(("hbar", fi)), Sense::drag());
             let strong = resp.hovered() || resp.dragged() || hovered_file == Some(fi);
+            if !strong {
+                continue;
+            }
             // Pinned to the window bottom it sits over code, so give it a band.
             if bottom - FOOT_H > viewport.max.y {
                 let card = (origin.x + 1.0)..=(origin.x + ui.max_rect().width() - 1.0);
                 painter.rect_filled(Rect::from_x_y_ranges(card, (track.top() - 3.0)..=(track.bottom() + 3.0)), 0.0, p.canvas);
             }
-            // Always a faint thumb, so wide files show they scroll.
-            let alpha = if resp.dragged() {
-                0.7
-            } else if strong {
-                0.45
-            } else {
-                0.2
-            };
+            let alpha = if resp.dragged() { 0.7 } else { 0.45 };
             painter.rect_filled(thumb, 3.0, p.fg_muted.gamma_multiply(alpha));
             if resp.dragged() {
                 let per_px = max / (track.width() - thumb_w).max(1.0);
@@ -992,7 +980,7 @@ fn file_header(app: &mut App, ui: &mut Ui, p: &Palette, f: &FileDiff, fi: usize,
         viewed_resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, f.viewed, "Viewed"));
     }
     let menu_resp = ui.interact(menu_rect, egui::Id::new(("file-menu", fi)), Sense::click());
-    let radius = if collapsed { CornerRadius::same(6) } else { CornerRadius { nw: 6, ne: 6, sw: 0, se: 0 } };
+    let radius = if collapsed { CornerRadius::same(theme::RADIUS) } else { CornerRadius { nw: theme::RADIUS, ne: theme::RADIUS, ..Default::default() } };
     painter.rect_filled(r, radius, p.canvas_subtle);
     painter.rect_stroke(r, radius, Stroke::new(1.0, p.border), StrokeKind::Inside);
     let mut x = r.left() + 10.0;
@@ -1000,7 +988,7 @@ fn file_header(app: &mut App, ui: &mut Ui, p: &Palette, f: &FileDiff, fi: usize,
     icons::paint(painter, Rect::from_min_size(pos2(x, r.center().y - 8.0), vec2(16.0, 16.0)), chevron, p.fg_muted);
     x += 24.0;
     let total = f.additions + f.deletions;
-    let g = painter.layout_no_wrap(format!("{total}"), theme::bold(12.0), p.fg);
+    let g = painter.layout_no_wrap(format!("{total}"), theme::bold(theme::TEXT_SMALL), p.fg);
     let gw = g.size().x;
     painter.galley(pos2(x, r.center().y - g.size().y / 2.0), g, p.fg);
     x += gw + 6.0;
@@ -1012,9 +1000,9 @@ fn file_header(app: &mut App, ui: &mut Ui, p: &Palette, f: &FileDiff, fi: usize,
     // Path, then a copy button right after it.
     let path_max = (menu_rect.left() - 8.0 - 28.0 - x).max(40.0);
     // Long paths lose their start, so the file name always shows.
-    let shown = crate::views::elide_front(painter, &name, theme::mono(12.0), path_max);
+    let shown = crate::views::elide_front(painter, &name, theme::mono(theme::TEXT_SMALL), path_max);
     let cut = shown != name;
-    let g = painter.layout_no_wrap(shown, theme::mono(12.0), p.fg);
+    let g = painter.layout_no_wrap(shown, theme::mono(theme::TEXT_SMALL), p.fg);
     let path_w = g.size().x;
     let path_rect = Rect::from_min_size(pos2(x, r.center().y - g.size().y / 2.0), g.size());
     painter.galley(path_rect.min, g, p.fg);
@@ -1025,12 +1013,12 @@ fn file_header(app: &mut App, ui: &mut Ui, p: &Palette, f: &FileDiff, fi: usize,
     let copy_resp = ui.interact(copy_rect, egui::Id::new(("file-copy", fi)), Sense::click());
     copy_resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Copy path"));
     if copy_resp.hovered() {
-        painter.rect_filled(copy_rect, 6.0, p.border.gamma_multiply(0.4));
+        painter.rect_filled(copy_rect, theme::RADIUS, p.border.gamma_multiply(0.4));
     }
     icons::paint(painter, copy_rect.shrink(5.0), Icon::Copy, p.fg_muted);
     // "⋯" menu.
     if menu_resp.hovered() {
-        painter.rect_filled(menu_rect, 6.0, p.border.gamma_multiply(0.4));
+        painter.rect_filled(menu_rect, theme::RADIUS, p.border.gamma_multiply(0.4));
     }
     icons::paint(painter, menu_rect.shrink(6.0), Icon::Kebab, p.fg_muted);
     if !src.commit {
@@ -1079,16 +1067,11 @@ fn viewed_box(painter: &egui::Painter, p: &Palette, r: Rect, viewed: bool, hover
         p.btn_bg
     };
     let border = if viewed { p.accent.gamma_multiply(0.5) } else { p.border };
-    painter.rect_filled(r, 6.0, bg);
-    painter.rect_stroke(r, 6.0, Stroke::new(1.0, border), StrokeKind::Inside);
-    let b = Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - 7.0), vec2(14.0, 14.0));
-    if viewed {
-        painter.rect_filled(b, 3.0, p.accent_emphasis);
-        icons::paint(painter, b.shrink(1.5), Icon::Check, egui::Color32::WHITE);
-    } else {
-        painter.rect_stroke(b, 3.0, Stroke::new(1.0, p.fg_muted), StrokeKind::Inside);
-    }
-    painter.text(pos2(b.right() + 8.0, r.center().y), Align2::LEFT_CENTER, "Viewed", theme::body(12.0), p.fg);
+    painter.rect_filled(r, theme::RADIUS, bg);
+    painter.rect_stroke(r, theme::RADIUS, Stroke::new(1.0, border), StrokeKind::Inside);
+    let b = Rect::from_min_size(pos2(r.left() + 10.0, r.center().y - theme::CHECK_BOX / 2.0), vec2(theme::CHECK_BOX, theme::CHECK_BOX));
+    crate::views::paint_checkbox(painter, b, viewed, hovered, p);
+    painter.text(pos2(b.right() + 8.0, r.center().y), Align2::LEFT_CENTER, "Viewed", theme::body(theme::TEXT_SMALL), p.fg);
 }
 
 /// GitHub's unfold arrows: ↑, ↓, or ↕ for "expand all".
@@ -1125,6 +1108,16 @@ fn rounded_bottom(painter: &egui::Painter, r: Rect, radius: f32, stroke: Stroke)
     pts.extend(arc(r.right() - radius, r.bottom() - radius, PI / 2.0, 0.0));
     pts.push(pos2(r.right(), r.top()));
     painter.add(egui::Shape::line(pts, stroke));
+}
+
+/// A code row's fill and its line-number gutter's fill.
+fn row_fills(row: &Row, p: &Palette) -> (egui::Color32, egui::Color32) {
+    match row {
+        Row::Line { kind: Kind::Add, .. } => (p.diff_add, p.diff_add_num),
+        Row::Line { kind: Kind::Del, .. } => (p.diff_del, p.diff_del_num),
+        Row::Line { kind: Kind::Hunk, .. } | Row::Expander { .. } => (p.diff_hunk, p.diff_hunk_num),
+        _ => (p.canvas, p.canvas),
+    }
 }
 
 fn side_borders(painter: &egui::Painter, p: &Palette, r: Rect) {

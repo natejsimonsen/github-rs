@@ -18,6 +18,43 @@ pub fn mono(size: f32) -> FontId {
     FontId::monospace(size)
 }
 
+// Type scale, in points. Use these, not literal sizes.
+/// Captions, hints, tooltips, counters. The smallest text in the app.
+pub const TEXT_SMALL: f32 = 12.0;
+/// Dense rows and descriptions.
+pub const TEXT_DENSE: f32 = 13.0;
+/// Body text, buttons, inputs.
+pub const TEXT_BODY: f32 = 14.0;
+/// The header title and the ⌘K input.
+pub const TEXT_LARGE: f32 = 16.0;
+/// Dialog titles.
+pub const TEXT_TITLE: f32 = 18.0;
+pub const TEXT_HEADING: f32 = 20.0;
+/// The sign-in page's headline.
+pub const TEXT_DISPLAY: f32 = 24.0;
+
+/// Height of every button, icon button, tab and one-line input.
+pub const CONTROL_H: f32 = 28.0;
+/// The top bar.
+pub const HEADER_H: f32 = 52.0;
+/// Icons inside controls.
+pub const ICON: f32 = 16.0;
+/// The square of a checkbox.
+pub const CHECK_BOX: f32 = 14.0;
+
+// Corner radii, like Primer's small / medium / large.
+/// Buttons, inputs, cards, tooltips, row highlights.
+pub const RADIUS: u8 = 6;
+/// Checkboxes, key caps and other tiny marks.
+pub const RADIUS_SMALL: u8 = 3;
+/// Dialogs, menus and popups.
+pub const RADIUS_OVERLAY: u8 = 12;
+
+/// The one shadow for floating surfaces: dialogs, menus, popups.
+pub fn overlay_shadow(p: &Palette) -> egui::epaint::Shadow {
+    egui::epaint::Shadow { offset: [0, 8], blur: 24, spread: 0, color: Color32::from_black_alpha(if p.dark { 150 } else { 45 }) }
+}
+
 /// Primer color tokens. Names match GitHub's CSS variables where possible.
 #[derive(Clone, Copy)]
 pub struct Palette {
@@ -27,6 +64,8 @@ pub struct Palette {
     pub header: Color32,
     pub border: Color32,
     pub border_muted: Color32,
+    /// Stronger border for small form controls (checkboxes, hovered inputs).
+    pub border_emphasis: Color32,
     pub fg: Color32,
     pub fg_muted: Color32,
     pub accent: Color32,
@@ -38,6 +77,17 @@ pub struct Palette {
     pub neutral: Color32,
     pub btn_bg: Color32,
     pub btn_primary: Color32,
+    /// Button fills under the pointer and while pressed.
+    pub btn_hover: Color32,
+    pub btn_active: Color32,
+    /// A disabled button: muted fill, dimmed but readable text.
+    pub btn_disabled: Color32,
+    pub fg_disabled: Color32,
+    /// Text and icons on strong fills (primary button, checked box, badges).
+    pub fg_on_emphasis: Color32,
+    /// The selected tab's underline, and the count pill beside a tab name.
+    pub tab_underline: Color32,
+    pub counter_bg: Color32,
     pub selected_row: Color32,
     pub hover_row: Color32,
     pub diff_add: Color32,
@@ -63,6 +113,10 @@ pub struct Palette {
     pub overlay: Color32,
     /// Tooltips and toasts: dark in both themes, like Primer.
     pub tooltip: Color32,
+    pub tooltip_fg: Color32,
+    /// Toast icons, bright enough for the dark tooltip fill.
+    pub tooltip_success: Color32,
+    pub tooltip_danger: Color32,
 }
 
 const fn hex(v: u32) -> Color32 {
@@ -76,6 +130,7 @@ pub const LIGHT: Palette = Palette {
     header: hex(0xf6f8fa),
     border: hex(0xd1d9e0),
     border_muted: hex(0xd8dee4),
+    border_emphasis: hex(0x818b98),
     fg: hex(0x1f2328),
     fg_muted: hex(0x59636e),
     accent: hex(0x0969da),
@@ -87,6 +142,13 @@ pub const LIGHT: Palette = Palette {
     neutral: hex(0x59636e),
     btn_bg: hex(0xf6f8fa),
     btn_primary: hex(0x1f883d),
+    btn_hover: hex(0xe6eaef),
+    btn_active: hex(0xdde3e9),
+    btn_disabled: hex(0xeff2f5),
+    fg_disabled: hex(0x818b98),
+    fg_on_emphasis: hex(0xffffff),
+    tab_underline: hex(0xfd8c73),
+    counter_bg: hex(0xe6eaef),
     selected_row: hex(0xddf4ff),
     hover_row: hex(0xeff2f5),
     diff_add: hex(0xdafbe1),
@@ -107,6 +169,9 @@ pub const LIGHT: Palette = Palette {
     backdrop: Color32::from_rgba_premultiplied(16, 18, 20, 128),
     overlay: hex(0xffffff),
     tooltip: hex(0x25292e),
+    tooltip_fg: hex(0xffffff),
+    tooltip_success: hex(0x4ac26b),
+    tooltip_danger: hex(0xff8182),
 };
 
 pub const DARK: Palette = Palette {
@@ -116,6 +181,7 @@ pub const DARK: Palette = Palette {
     header: hex(0x010409),
     border: hex(0x3d444d),
     border_muted: hex(0x2f353d),
+    border_emphasis: hex(0x656c76),
     fg: hex(0xf0f6fc),
     fg_muted: hex(0x9198a1),
     accent: hex(0x4493f8),
@@ -127,6 +193,13 @@ pub const DARK: Palette = Palette {
     neutral: hex(0x9198a1),
     btn_bg: hex(0x212830),
     btn_primary: hex(0x238636),
+    btn_hover: hex(0x262c36),
+    btn_active: hex(0x2a313c),
+    btn_disabled: hex(0x212830),
+    fg_disabled: hex(0x656c76),
+    fg_on_emphasis: hex(0xffffff),
+    tab_underline: hex(0xfd8c73),
+    counter_bg: hex(0x2f353d),
     selected_row: hex(0x121d2f),
     hover_row: hex(0x1f242c),
     diff_add: hex(0x12261e),
@@ -147,6 +220,9 @@ pub const DARK: Palette = Palette {
     backdrop: Color32::from_rgba_premultiplied(1, 3, 7, 204),
     overlay: hex(0x151b23),
     tooltip: hex(0x3d444d),
+    tooltip_fg: hex(0xffffff),
+    tooltip_success: hex(0x4ac26b),
+    tooltip_danger: hex(0xff8182),
 };
 
 pub fn palette(ctx: &egui::Context) -> &'static Palette {
@@ -171,18 +247,18 @@ pub fn visuals(p: &Palette) -> Visuals {
     v.widgets.noninteractive.bg_fill = p.canvas;
     v.widgets.inactive.bg_fill = p.btn_bg;
     v.widgets.inactive.weak_bg_fill = p.btn_bg;
-    v.widgets.hovered.weak_bg_fill = if p.dark { hex(0x262c36) } else { hex(0xeff2f5) };
-    v.widgets.hovered.bg_fill = v.widgets.hovered.weak_bg_fill;
+    v.widgets.hovered.weak_bg_fill = p.btn_hover;
+    v.widgets.hovered.bg_fill = p.btn_hover;
     v.widgets.hovered.bg_stroke = Stroke::new(1.0, p.border);
-    v.widgets.active.weak_bg_fill = if p.dark { hex(0x2a313c) } else { hex(0xe6eaef) };
+    v.widgets.active.weak_bg_fill = p.btn_active;
     v.widgets.active.bg_stroke = Stroke::new(1.0, p.accent);
     for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.noninteractive] {
-        w.corner_radius = 6.into();
+        w.corner_radius = RADIUS.into();
     }
     // Menus and popups: Primer's overlay look.
-    v.menu_corner_radius = 12.into();
-    v.window_corner_radius = 12.into();
-    v.popup_shadow = egui::epaint::Shadow { offset: [0, 8], blur: 24, spread: 0, color: Color32::from_black_alpha(if p.dark { 150 } else { 45 }) };
+    v.menu_corner_radius = RADIUS_OVERLAY.into();
+    v.window_corner_radius = RADIUS_OVERLAY.into();
+    v.popup_shadow = overlay_shadow(p);
     v.window_fill = p.overlay;
     v
 }
@@ -193,14 +269,14 @@ pub fn apply(ctx: &egui::Context) {
     ctx.all_styles_mut(|s| {
         s.spacing.item_spacing = egui::vec2(8.0, 6.0);
         s.spacing.button_padding = egui::vec2(12.0, 5.0);
-        s.spacing.interact_size.y = 28.0;
+        s.spacing.interact_size.y = CONTROL_H;
         // egui's edge fade blurs the last row of a list; scroll bars are enough.
         s.spacing.scroll.fade.strength = 0.0;
-        s.text_styles.insert(egui::TextStyle::Body, body(14.0));
-        s.text_styles.insert(egui::TextStyle::Button, body(14.0));
-        s.text_styles.insert(egui::TextStyle::Small, body(12.0));
-        s.text_styles.insert(egui::TextStyle::Monospace, mono(12.0));
-        s.text_styles.insert(egui::TextStyle::Heading, bold(20.0));
+        s.text_styles.insert(egui::TextStyle::Body, body(TEXT_BODY));
+        s.text_styles.insert(egui::TextStyle::Button, body(TEXT_BODY));
+        s.text_styles.insert(egui::TextStyle::Small, body(TEXT_SMALL));
+        s.text_styles.insert(egui::TextStyle::Monospace, mono(TEXT_SMALL));
+        s.text_styles.insert(egui::TextStyle::Heading, bold(TEXT_HEADING));
     });
     ctx.set_fonts(fonts());
 }

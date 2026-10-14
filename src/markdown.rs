@@ -22,7 +22,7 @@ use std::sync::Arc;
 pub fn show(ui: &mut egui::Ui, id: egui::Id, source: &str) -> Option<String> {
     let doc = parsed(source);
     let p = theme::palette(ui.ctx());
-    let mut r = Render { p, color: p.fg, size: 14.0, first: None, clicked: None, metrics: HashMap::new(), depth: 0 };
+    let mut r = Render { p, color: p.fg, size: theme::TEXT_BODY, first: None, clicked: None, metrics: HashMap::new(), depth: 0 };
     ui.vertical(|ui| {
         // We place everything ourselves, and our text has explicit colors.
         ui.spacing_mut().item_spacing = Vec2::ZERO;
@@ -651,6 +651,9 @@ struct Render {
     depth: usize,
 }
 
+/// Room on each side of inline code, as a share of its font size.
+const CODE_PAD: f32 = 0.25;
+
 fn font(mono: bool, bold: bool, size: f32) -> FontId {
     match (mono, bold) {
         (true, true) => FontId::new(size, FontFamily::Name(theme::MONO_BOLD.into())),
@@ -725,6 +728,9 @@ impl Render {
         let mut chars = 0;
         // Room to leave after inline code, for its padded background.
         let mut pad = 0.0;
+        // egui fakes italics by leaning each glyph right by a quarter of its
+        // height, so the last letter eats the space after it. Give that back.
+        let mut lean = 0.0;
         for span in &inl.spans {
             match span {
                 Span::Text(text, st) => {
@@ -753,9 +759,11 @@ impl Render {
                         valign,
                         ..Default::default()
                     };
-                    let code_pad = if st.code { 0.3 * size } else { 0.0 };
-                    job.append(text, pad + code_pad, format);
+                    let code_pad = if st.code { CODE_PAD * size } else { 0.0 };
+                    let lean_here = if st.italic { 0.0 } else { lean };
+                    job.append(text, pad + code_pad + lean_here, format);
                     pad = code_pad;
+                    lean = if st.italic { 0.2 * size } else { 0.0 };
                     let n = text.chars().count();
                     if st.code {
                         runs.code.push(chars..chars + n);
@@ -775,8 +783,8 @@ impl Render {
                         valign: Align::TOP,
                         ..Default::default()
                     };
-                    job.append("\u{2003}", pad, format);
-                    pad = 0.0;
+                    job.append("\u{2003}", pad + lean, format);
+                    (pad, lean) = (0.0, 0.0);
                     runs.emoji.push((chars, uri.clone(), size));
                     if let Some(l) = st.link {
                         runs.links.push((chars..chars + 1, l));
@@ -785,8 +793,8 @@ impl Render {
                 }
                 Span::Image { alt, .. } => {
                     let format = TextFormat { font_id: theme::body(base.size), color: base.color, ..Default::default() };
-                    job.append(alt, pad, format);
-                    pad = 0.0;
+                    job.append(alt, pad + lean, format);
+                    (pad, lean) = (0.0, 0.0);
                     chars += alt.chars().count();
                 }
             }
@@ -832,13 +840,15 @@ impl Render {
 
         // Inline code: a rounded, padded background under the text.
         let code_bg = if self.p.dark { Color32::from_rgba_unmultiplied(101, 108, 118, 51) } else { Color32::from_rgba_unmultiplied(129, 139, 152, 31) };
-        let pad = 0.4 * runs.code_size;
+        // The same room the layout left, so the chip never covers the
+        // punctuation next to it.
+        let pad = CODE_PAD * runs.code_size;
         let mut shapes = Vec::new();
         for range in &runs.code {
             row_pieces(galley, range, |row, x0, x1, g| {
                 let top = gpos.y + row.pos.y + g.pos.y - g.font_ascent - 0.2 * runs.code_size;
                 let r = Rect::from_min_max(pos2(gpos.x + x0 - pad, top), pos2(gpos.x + x1 + pad, top + g.font_height + 0.4 * runs.code_size));
-                shapes.push(Shape::rect_filled(r, 6.0, code_bg));
+                shapes.push(Shape::rect_filled(r, theme::RADIUS, code_bg));
             });
         }
         painter.set(bg, Shape::Vec(shapes));
@@ -916,7 +926,7 @@ impl Render {
                 ui.painter().rect_filled(rect, 0.0, self.p.border);
                 ui.add_space(16.0);
                 let (size, color) = (self.size, self.color);
-                self.size = 12.0;
+                self.size = theme::TEXT_SMALL;
                 self.color = self.p.fg_muted;
                 self.list(ui, id, Some(1), items);
                 (self.size, self.color) = (size, color);
@@ -989,7 +999,7 @@ impl Render {
         let galley = ui.painter().layout_job(job);
         // The frame's padding comes out of the width we were given.
         let inner_w = (ui.available_width() - 32.0).max(40.0);
-        egui::Frame::new().fill(self.p.canvas_subtle).corner_radius(6.0).inner_margin(16.0).show(ui, |ui| {
+        egui::Frame::new().fill(self.p.canvas_subtle).corner_radius(theme::RADIUS).inner_margin(16.0).show(ui, |ui| {
             ui.set_width(inner_w);
             solid_bar(ui);
             egui::ScrollArea::horizontal().id_salt(id).auto_shrink([false, true]).max_width(inner_w).show(ui, |ui| {
@@ -1086,7 +1096,10 @@ impl Render {
             }
             let top = ui.cursor().top();
             let mut rect = ui.available_rect_before_wrap();
-            let content = rect.left() + indent;
+            let left = rect.left();
+            // Task boxes sit on the paragraph's left edge, with the text
+            // right after them, like github.com.
+            let content = left + if item.task.is_some() { theme::CHECK_BOX + 0.5 * base.size } else { indent };
             rect.min.x = content;
             let outer = self.first.take();
             ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
@@ -1103,15 +1116,8 @@ impl Render {
             let s = base.size / 14.0;
             let painter = ui.painter();
             if let Some(done) = item.task {
-                let r = Rect::from_center_size(pos2(content - 1.4 * base.size + 7.0, mid - 1.0), Vec2::splat(14.0));
-                if done {
-                    painter.rect_filled(r, 3.0, self.p.accent);
-                    let at = |x: f32, y: f32| pos2(r.left() + x, r.top() + y);
-                    painter.add(Shape::line(vec![at(3.5, 7.25), at(6.0, 9.75), at(10.75, 4.75)], Stroke::new(1.75, Color32::WHITE)));
-                } else {
-                    painter.rect_filled(r, 3.0, self.p.canvas);
-                    painter.rect_stroke(r, 3.0, Stroke::new(1.0, self.p.fg_muted), egui::StrokeKind::Inside);
-                }
+                let r = Rect::from_min_size(pos2(left, mid - 1.0 - theme::CHECK_BOX / 2.0), Vec2::splat(theme::CHECK_BOX));
+                crate::views::paint_checkbox(painter, r, done, false, self.p);
             } else if let Some(first) = start {
                 let label = list_number(first + n as u64, depth);
                 let g = painter.layout_no_wrap(label, theme::body(base.size), base.color);
@@ -1345,8 +1351,7 @@ pub fn solid_bar(ui: &mut Ui) {
     scroll.fade.strength = 0.0;
     ui.spacing_mut().scroll = scroll;
     // The handle needs to stand out from its track in light mode too.
-    let handle = if ui.visuals().dark_mode { egui::Color32::from_rgb(0x3d, 0x44, 0x4d) } else { egui::Color32::from_rgb(0xd1, 0xd9, 0xe0) };
-    ui.visuals_mut().widgets.inactive.bg_fill = handle;
+    ui.visuals_mut().widgets.inactive.bg_fill = theme::palette(ui.ctx()).border;
 }
 
 #[cfg(test)]

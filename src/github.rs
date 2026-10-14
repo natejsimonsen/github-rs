@@ -749,7 +749,7 @@ impl Client {
                 .filter(|d| !d["repository"]["issue"].is_null());
             return Err(Error::Other(match what {
                 Some(_) => format!("{repo}#{number} is an issue, not a pull request."),
-                None => format!("No pull request {repo}#{number}, or you don't have access to it."),
+                None => format!("No pull request {repo}#{number}, or you don't have access to it. Check the number, or press Esc."),
             }));
         }
         let mut pr: PrSummary = serde_json::from_value(node.clone()).map_err(|e| Error::Other(format!("Unexpected response: {e}")))?;
