@@ -1670,6 +1670,8 @@ impl eframe::App for App {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        crate::macos::place_traffic_lights(frame);
         let ctx = ui.ctx().clone();
         let frame_start = Instant::now();
         while let Ok(msg) = self.rx.try_recv() {

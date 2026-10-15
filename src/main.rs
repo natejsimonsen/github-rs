@@ -12,6 +12,8 @@ mod gfm;
 mod github;
 mod icons;
 mod images;
+#[cfg(target_os = "macos")]
+mod macos;
 mod markdown;
 mod settings;
 #[cfg(feature = "snapshot")]
@@ -33,8 +35,9 @@ fn main() -> eframe::Result {
             .with_app_id("github-prs")
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([900.0, 560.0])
-            // macOS: no title bar. The app fills the window and the traffic
-            // lights sit over the app's own header, which drags the window.
+            // macOS: no title bar. The app fills the window, its header drags
+            // the window, and the traffic lights sit centered in the header
+            // (see `macos::place_traffic_lights`).
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
             .with_title_shown(false),

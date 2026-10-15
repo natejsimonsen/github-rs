@@ -57,7 +57,9 @@ fn header(app: &mut App, ui: &mut Ui, p: &Palette) {
         drag_window(ui);
         ui.horizontal_centered(|ui| {
             // Room for the macOS traffic lights, which sit over the header.
-            if cfg!(target_os = "macos") {
+            // Full screen hides them, so it needs no gap.
+            let fullscreen = ui.input(|i| i.viewport().fullscreen.unwrap_or(false));
+            if cfg!(target_os = "macos") && !fullscreen {
                 ui.add_space(TRAFFIC_LIGHTS_W);
             }
             // Item spacing is the one gap between header items.
