@@ -32,7 +32,12 @@ fn main() -> eframe::Result {
             .with_title("Pull requests")
             .with_app_id("github-prs")
             .with_inner_size([1440.0, 900.0])
-            .with_min_inner_size([900.0, 560.0]),
+            .with_min_inner_size([900.0, 560.0])
+            // macOS: no title bar. The app fills the window and the traffic
+            // lights sit over the app's own header, which drags the window.
+            .with_fullsize_content_view(true)
+            .with_titlebar_shown(false)
+            .with_title_shown(false),
         // Only redraw when something changes, so the app idles at ~0% CPU.
         run_and_return: false,
         ..Default::default()

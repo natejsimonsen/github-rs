@@ -730,12 +730,10 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
     let char_w = ui.fonts_mut(|f| f.glyph_width(&theme::mono(theme::TEXT_SMALL), 'M'));
     // Salted per PR or commit, so pages don't inherit each other's scroll.
     let mut area = egui::ScrollArea::vertical().id_salt(("diff", current_id)).auto_shrink([false, false]);
-    // A PR's diff folds the header like its other tabs; a commit's header is always slim.
+    // Folds the header like the PR's other tabs (on a commit, its box).
     let page = egui::Id::new(("diff", current_id));
     let top = ui.available_rect_before_wrap().min.y;
-    if !src.commit {
-        area = crate::views::keep_still(app, area, page, top);
-    }
+    area = crate::views::keep_still(app, area, page, top);
     let jump = ui.ctx().data_mut(|d| d.remove_temp::<f32>(jump_id));
     if let Some(y) = jump {
         area = area.vertical_scroll_offset(y);
@@ -944,23 +942,21 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
         }
     });
     ui.ctx().data_mut(|d| d.insert_temp(pan_id, pans));
-    if !src.commit {
-        // A jump (tree pick, folding the pinned file) leaves the header as is
-        // until the user scrolls; landing near the top would unfold it and
-        // push the file we jumped to out of view.
-        let y = out.state.offset.y;
-        let hold_id = egui::Id::new(("diff-fold-hold", current_id));
-        if jump.is_some() {
-            ui.ctx().data_mut(|d| d.insert_temp(hold_id, y));
-        }
-        let wheel = ui.input(|i| i.smooth_scroll_delta.y != 0.0);
-        let held = ui.ctx().data(|d| d.get_temp::<f32>(hold_id)).is_some_and(|h| h == y && !wheel);
-        if held {
-            app.detail_top = Some((page, top, y));
-        } else {
-            ui.ctx().data_mut(|d| d.remove::<f32>(hold_id));
-            crate::views::fold_header(app, page, top, y);
-        }
+    // A jump (tree pick, folding the pinned file) leaves the header as is
+    // until the user scrolls; landing near the top would unfold it and
+    // push the file we jumped to out of view.
+    let y = out.state.offset.y;
+    let hold_id = egui::Id::new(("diff-fold-hold", current_id));
+    if jump.is_some() {
+        ui.ctx().data_mut(|d| d.insert_temp(hold_id, y));
+    }
+    let wheel = ui.input(|i| i.smooth_scroll_delta.y != 0.0);
+    let held = ui.ctx().data(|d| d.get_temp::<f32>(hold_id)).is_some_and(|h| h == y && !wheel);
+    if held {
+        app.detail_top = Some((page, top, y));
+    } else {
+        ui.ctx().data_mut(|d| d.remove::<f32>(hold_id));
+        crate::views::fold_header(app, page, top, y);
     }
 }
 

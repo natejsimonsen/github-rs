@@ -58,15 +58,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         commit_page(app, ui, p, &page, detail.as_deref());
         return;
     }
-    let header_h = ui
-        .scope(|ui| {
-            ui.set_max_width(full - 14.0);
-            header(app, ui, p, &sel, detail.as_deref(), files.as_deref().map(|f| f.len()));
-        })
-        .response
-        .rect
-        .height();
-    app.header_h[app.detail_scrolled as usize] = header_h;
+    ui.scope(|ui| {
+        ui.set_max_width(full - 14.0);
+        header(app, ui, p, &sel, detail.as_deref(), files.as_deref().map(|f| f.len()));
+    });
     ui.add_space(8.0);
 
     if let Some(e) = &error {
@@ -181,12 +176,45 @@ pub(crate) fn fold_header(app: &mut App, page: egui::Id, top: f32, y: f32) {
 }
 
 fn header(app: &mut App, ui: &mut Ui, p: &Palette, sel: &PrSummary, d: Option<&PrDetail>, file_count: Option<usize>) {
-    if app.detail_scrolled {
-        slim_header(ui, p, sel, d);
-    } else {
-        full_header(app, ui, p, sel, d);
-    }
+    folding(app, ui, |app, ui| full_header(app, ui, p, sel, d), |_, ui| slim_header(ui, p, sel, d));
     tab_row(app, ui, p, d, file_count);
+}
+
+/// How long the header takes to fold or unfold, in seconds.
+const FOLD_TIME: f32 = 0.22;
+
+/// Draws a page's full or slim header, as `app.detail_scrolled` says. When
+/// that flips, the height eases from one to the other while the two
+/// cross-fade, so the page below glides instead of jumping. Records both
+/// heights in `app.header_h` for `fold_header`.
+fn folding(app: &mut App, ui: &mut Ui, full: impl FnOnce(&mut App, &mut Ui), slim: impl FnOnce(&mut App, &mut Ui)) {
+    let t = ui.ctx().animate_bool_with_time_and_easing(egui::Id::new("header-fold"), app.detail_scrolled, FOLD_TIME, egui::emath::easing::cubic_in_out);
+    let top = ui.cursor().min;
+    let width = ui.available_width();
+    // Mid-fold, the box shrinks or grows between last frame's two heights.
+    let [full_h, slim_h] = app.header_h;
+    let height = egui::lerp(full_h..=slim_h, t);
+    let clip = Rect::from_min_size(top, vec2(width, height)).intersect(ui.clip_rect());
+    let moving = t > 0.0 && t < 1.0;
+    let layer = |ui: &mut Ui, salt: &str, opacity: f32, draw: &mut dyn FnMut(&mut Ui)| {
+        let mut child = ui.new_child(egui::UiBuilder::new().id_salt(salt).max_rect(Rect::from_min_size(top, vec2(width, ui.available_height()))));
+        if moving {
+            child.set_clip_rect(clip);
+            child.multiply_opacity(opacity);
+        }
+        draw(&mut child);
+        child.min_rect().height()
+    };
+    let mut full = Some(full);
+    let mut slim = Some(slim);
+    if t < 1.0 {
+        app.header_h[0] = layer(ui, "full", 1.0 - t, &mut |ui| full.take().unwrap()(app, ui));
+    }
+    if t > 0.0 {
+        app.header_h[1] = layer(ui, "slim", t, &mut |ui| slim.take().unwrap()(app, ui));
+    }
+    let height = if moving { height } else { app.header_h[(t == 1.0) as usize] };
+    ui.advance_cursor_after_rect(Rect::from_min_size(top, vec2(width, height)));
 }
 
 /// Once you scroll into a PR: one line with its state and title, so the
@@ -2773,51 +2801,84 @@ fn commit_page(app: &mut App, ui: &mut Ui, p: &Palette, page: &CommitPage, d: Op
     let full = ui.available_width();
     ui.scope(|ui| {
         ui.set_max_width(full - 14.0);
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            if link_styled(ui, "← Back to pull request", theme::body(theme::TEXT_DENSE), p.accent).tip("Back (Esc)").clicked() {
-                app.actions.push(Action::CloseCommit);
-            }
-            // Prev / Next walk the PR's commits, like GitHub's commit pages.
-            let nodes = d.map(|d| &d.commits.nodes[..]).unwrap_or(&[]);
-            if let Some(i) = nodes.iter().position(|n| n.commit.oid == page.oid) {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    let next = nodes.get(i + 1).map(|n| n.commit.oid.clone());
-                    let prev = i.checked_sub(1).map(|j| nodes[j].commit.oid.clone());
-                    if ui.add_enabled(next.is_some(), button("Next ›", p)).clicked() {
-                        app.actions.push(Action::OpenCommit(page.repo.clone(), next.unwrap_or_default()));
-                    }
-                    if ui.add_enabled(prev.is_some(), button("‹ Prev", p)).clicked() {
-                        app.actions.push(Action::OpenCommit(page.repo.clone(), prev.unwrap_or_default()));
-                    }
-                    ui.add_space(8.0);
-                    ui.label(RichText::new(format!("Commit {} of {}", i + 1, nodes.len())).size(theme::TEXT_DENSE).color(p.fg_muted));
-                });
-            }
-        });
-        ui.add_space(8.0);
-        match &data {
-            Some(c) => commit_box(app, ui, p, c, page),
-            None => match &error {
-                Some(e) => {
-                    if super::error_banner(ui, p, "Couldn't load this commit.", e) {
-                        app.commits.remove(&key);
-                        app.actions.push(Action::OpenCommit(page.repo.clone(), page.oid.clone()));
-                    }
-                }
-                None => {
-                    ui.add_space(40.0);
-                    ui.vertical_centered(|ui| ui.add(egui::Spinner::new().size(24.0).color(p.fg_muted)));
+        // Scrolled into the diff, the commit's box folds away and its
+        // headline joins the Back row, so a short screen keeps the diff.
+        let headline = data.as_ref().map(|c| c.headline().to_string());
+        folding(
+            app,
+            ui,
+            |app, ui| {
+                commit_nav(app, ui, p, page, d, None);
+                ui.add_space(8.0);
+                match &data {
+                    Some(c) => commit_box(app, ui, p, c, page),
+                    None => match &error {
+                        Some(e) => {
+                            if super::error_banner(ui, p, "Couldn't load this commit.", e) {
+                                app.commits.remove(&key);
+                                app.actions.push(Action::OpenCommit(page.repo.clone(), page.oid.clone()));
+                            }
+                        }
+                        None => {
+                            ui.add_space(40.0);
+                            ui.vertical_centered(|ui| ui.add(egui::Spinner::new().size(24.0).color(p.fg_muted)));
+                        }
+                    },
                 }
             },
-        }
+            |app, ui| commit_nav(app, ui, p, page, d, headline.as_deref()),
+        );
     });
     if let Some(c) = data {
         ui.add_space(12.0);
         let src = diff::Source { repo: &page.repo, head: &c.sha, commit: true };
         diff::show(app, ui, &key, c.files.clone(), src);
     }
+}
+
+/// The Back link and Prev / Next above a commit, with its headline once
+/// the commit's box has folded away.
+fn commit_nav(app: &mut App, ui: &mut Ui, p: &Palette, page: &CommitPage, d: Option<&PrDetail>, headline: Option<&str>) {
+    ui.horizontal(|ui| {
+        ui.set_min_height(theme::CONTROL_H);
+        ui.spacing_mut().item_spacing.x = 4.0;
+        if link_styled(ui, "← Back to pull request", theme::body(theme::TEXT_DENSE), p.accent).tip("Back (Esc)").clicked() {
+            app.actions.push(Action::CloseCommit);
+        }
+        // Prev / Next walk the PR's commits, like GitHub's commit pages.
+        let nodes = d.map(|d| &d.commits.nodes[..]).unwrap_or(&[]);
+        let at = nodes.iter().position(|n| n.commit.oid == page.oid);
+        if let Some(h) = headline {
+            // Cut to leave room for Prev / Next on the right.
+            let room = ui.available_width() - if at.is_some() { 260.0 } else { 0.0 };
+            let mut job = egui::text::LayoutJob::default();
+            super::append_title(&mut job, h, theme::TEXT_DENSE, true, 0.0, p);
+            job.wrap = egui::text::TextWrapping::truncate_at_width((room - 16.0).max(60.0));
+            let g = ui.painter().layout_job(job);
+            let cut = g.elided;
+            ui.label(RichText::new("·").size(theme::TEXT_DENSE).color(p.fg_muted));
+            let (r, resp) = ui.allocate_exact_size(g.size(), Sense::hover());
+            ui.painter().galley(r.min, g, p.fg);
+            if cut {
+                resp.tip(h);
+            }
+        }
+        if let Some(i) = at {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let next = nodes.get(i + 1).map(|n| n.commit.oid.clone());
+                let prev = i.checked_sub(1).map(|j| nodes[j].commit.oid.clone());
+                if ui.add_enabled(next.is_some(), button("Next ›", p)).clicked() {
+                    app.actions.push(Action::OpenCommit(page.repo.clone(), next.unwrap_or_default()));
+                }
+                if ui.add_enabled(prev.is_some(), button("‹ Prev", p)).clicked() {
+                    app.actions.push(Action::OpenCommit(page.repo.clone(), prev.unwrap_or_default()));
+                }
+                ui.add_space(8.0);
+                ui.label(RichText::new(format!("Commit {} of {}", i + 1, nodes.len())).size(theme::TEXT_DENSE).color(p.fg_muted));
+            });
+        }
+    });
 }
 
 /// The box at the top of a commit's page: message, author, SHA and parents.

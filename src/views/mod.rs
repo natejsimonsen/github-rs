@@ -54,7 +54,12 @@ pub fn main(app: &mut App, ui: &mut Ui) {
 fn header(app: &mut App, ui: &mut Ui, p: &Palette) {
     // No frame stroke: the panel's own separator is the one bottom rule.
     egui::Panel::top("header").exact_size(theme::HEADER_H).frame(Frame::new().fill(p.header).inner_margin(Margin::symmetric(16, 0))).show(ui, |ui| {
+        drag_window(ui);
         ui.horizontal_centered(|ui| {
+            // Room for the macOS traffic lights, which sit over the header.
+            if cfg!(target_os = "macos") {
+                ui.add_space(TRAFFIC_LIGHTS_W);
+            }
             // Item spacing is the one gap between header items.
             let list_open = if app.narrow { app.list_open_narrow } else { app.panels.list };
             let (icon, tip) =
@@ -95,9 +100,32 @@ fn header(app: &mut App, ui: &mut Ui, p: &Palette) {
     });
 }
 
+/// Width the macOS close / minimize / zoom buttons take at the window's left.
+const TRAFFIC_LIGHTS_W: f32 = 64.0;
+
+/// With no title bar, dragging empty space here moves the window and a
+/// double-click zooms it, like a title bar. Call before drawing the
+/// controls, so they still get their clicks.
+fn drag_window(ui: &mut Ui) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let r = ui.interact(ui.max_rect(), ui.id().with("drag-window"), Sense::click_and_drag());
+    if r.drag_started() {
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::StartDrag);
+    }
+    if r.double_clicked() {
+        let max = ui.ctx().input(|i| i.viewport().maximized.unwrap_or(false));
+        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
+    }
+}
+
 pub fn sign_in(app: &mut App, ui: &mut Ui) {
     let p = theme::palette(ui.ctx());
     egui::CentralPanel::default().frame(Frame::new().fill(p.canvas_subtle)).show(ui, |ui| {
+        // No header here: the top strip stands in for the title bar.
+        let strip = Rect::from_min_size(ui.max_rect().min, vec2(ui.max_rect().width(), 28.0));
+        drag_window(&mut ui.new_child(egui::UiBuilder::new().max_rect(strip)));
         ui.vertical_centered(|ui| {
             ui.add_space((ui.available_height() / 2.0 - 190.0).max(40.0));
             icons::show(ui, Icon::PrOpen, 48.0, p.fg);
