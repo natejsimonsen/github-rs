@@ -780,70 +780,21 @@ impl Client {
     }
 
     pub fn detail(&self, id: &str) -> Result<PrDetail> {
-        const Q: &str = r#"
-query($id: ID!) { node(id: $id) { ... on PullRequest {
-  id number title url body state isDraft createdAt mergedAt
-  additions deletions changedFiles baseRefName headRefName mergeable reviewDecision headRefOid
-  mergeStateStatus autoMergeRequest { mergeMethod enabledBy { login avatarUrl(size: 80) } }
-  viewerCanEnableAutoMerge viewerCanDisableAutoMerge
-  latestOpinionatedReviews(first: 30) { nodes { state author { login } } }
-  reviewThreads(first: 100) { nodes {
-    id isResolved isOutdated path line originalLine viewerCanResolve viewerCanUnresolve viewerCanReply
-    resolvedBy { login avatarUrl(size: 80) }
-    comments(first: 50) { nodes { author { login avatarUrl(size: 80) } body createdAt url diffHunk pullRequestReview { id } } }
-  } }
-  author { login avatarUrl(size: 80) }
-  repository { nameWithOwner autoMergeAllowed mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed viewerDefaultMergeMethod }
-  labels(first: 20) { nodes { name color } }
-  assignees(first: 10) { nodes { login avatarUrl(size: 80) } }
-  reviewRequests(first: 20) { nodes { requestedReviewer {
-    ... on User { login avatarUrl(size: 80) } ... on Team { name } } } }
-  comments(first: 100) { nodes { author { login avatarUrl(size: 80) } body createdAt url } }
-  reviews(first: 100) { nodes {
-    id author { login avatarUrl(size: 80) } body state submittedAt url
-  } }
-  commits(last: 100) { totalCount nodes { commit {
-    oid abbreviatedOid messageHeadline messageBody committedDate
-    author { name user { login avatarUrl(size: 80) } }
-    statusCheckRollup { state }
-    signature { isValid }
-  } } }
-  timelineItems(last: 100, itemTypes: [MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT, HEAD_REF_DELETED_EVENT,
-      HEAD_REF_FORCE_PUSHED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, REVIEW_REQUESTED_EVENT,
-      LABELED_EVENT, UNLABELED_EVENT, ASSIGNED_EVENT, AUTO_MERGE_ENABLED_EVENT, AUTO_MERGE_DISABLED_EVENT,
-      PULL_REQUEST_COMMIT]) { nodes {
-    __typename
-    ... on MergedEvent { createdAt actor { login avatarUrl(size: 40) } mergeRefName commit { oid abbreviatedOid } }
-    ... on ClosedEvent { createdAt actor { login avatarUrl(size: 40) } }
-    ... on ReopenedEvent { createdAt actor { login avatarUrl(size: 40) } }
-    ... on HeadRefDeletedEvent { createdAt actor { login avatarUrl(size: 40) } headRefName }
-    ... on HeadRefForcePushedEvent { createdAt actor { login avatarUrl(size: 40) }
-      beforeCommit { oid abbreviatedOid } afterCommit { oid abbreviatedOid } }
-    ... on ReadyForReviewEvent { createdAt actor { login avatarUrl(size: 40) } }
-    ... on ConvertToDraftEvent { createdAt actor { login avatarUrl(size: 40) } }
-    ... on ReviewRequestedEvent { createdAt actor { login avatarUrl(size: 40) }
-      requestedReviewer { ... on User { login avatarUrl(size: 40) } ... on Team { name } } }
-    ... on LabeledEvent { createdAt actor { login avatarUrl(size: 40) } label { name color } }
-    ... on UnlabeledEvent { createdAt actor { login avatarUrl(size: 40) } label { name color } }
-    ... on AssignedEvent { createdAt actor { login avatarUrl(size: 40) } assignee { ... on User { login avatarUrl(size: 40) } } }
-    ... on AutoMergeEnabledEvent { createdAt actor { login avatarUrl(size: 40) } }
-    ... on AutoMergeDisabledEvent { createdAt actor { login avatarUrl(size: 40) } }
-    ... on PullRequestCommit { commit { oid abbreviatedOid messageHeadline committedDate
-      statusCheckRollup { state } author { name user { login avatarUrl(size: 40) } } } }
-  } }
-  head: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
-    __typename
-    ... on CheckRun { name status conclusion detailsUrl title startedAt completedAt isRequired(pullRequestId: $id)
-      checkSuite { app { logoUrl(size: 40) } workflowRun { event workflow { name } } } }
-    ... on StatusContext { context state targetUrl description avatarUrl(size: 40) isRequired(pullRequestId: $id) }
-  } } } } } }
-} } }"#;
-        let mut data = self.graphql(Q, json!({ "id": id }))?;
-        let node = data["node"].take();
-        let checks = parse_checks(&node["head"]);
-        let mut d: PrDetail = serde_json::from_value(node).map_err(|e| Error::Other(format!("Unexpected response: {e}")))?;
-        d.checks = checks;
-        Ok(d)
+        let q = format!("query($id: ID!) {{ node(id: $id) {{ ... on PullRequest {{ {} }} }} }}", DETAIL_FIELDS.replace("PR_ARG", "pullRequestId: $id"));
+        let mut data = self.graphql(&q, json!({ "id": id }))?;
+        parse_detail(data["node"].take())
+    }
+
+    /// The same as `detail`, by repo and number, for when the PR's id isn't
+    /// known yet.
+    pub fn detail_by_number(&self, repo: &str, number: u64) -> Result<PrDetail> {
+        let q = format!(
+            "query($owner: String!, $name: String!, $n: Int!) {{ repository(owner: $owner, name: $name) {{ pullRequest(number: $n) {{ {} }} }} }}",
+            DETAIL_FIELDS.replace("PR_ARG", "pullRequestNumber: $n")
+        );
+        let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
+        let mut data = self.graphql(&q, json!({ "owner": owner, "name": name, "n": number }))?;
+        parse_detail(data["repository"]["pullRequest"].take())
     }
 
     /// All changed files with their patches. GitHub caps this at 3000 files.
@@ -1114,4 +1065,71 @@ fn parse_check(n: &Value, s: impl Fn(&Value) -> Option<String>) -> Check {
             seconds: None,
         }
     }
+}
+
+/// Everything the PR page shows. `PR_ARG` tells check runs which PR to
+/// answer "is this check required" for.
+const DETAIL_FIELDS: &str = r#"
+  id number title url body state isDraft createdAt mergedAt
+  additions deletions changedFiles baseRefName headRefName mergeable reviewDecision headRefOid
+  mergeStateStatus autoMergeRequest { mergeMethod enabledBy { login avatarUrl(size: 80) } }
+  viewerCanEnableAutoMerge viewerCanDisableAutoMerge
+  latestOpinionatedReviews(first: 30) { nodes { state author { login } } }
+  reviewThreads(first: 100) { nodes {
+    id isResolved isOutdated path line originalLine viewerCanResolve viewerCanUnresolve viewerCanReply
+    resolvedBy { login avatarUrl(size: 80) }
+    comments(first: 50) { nodes { author { login avatarUrl(size: 80) } body createdAt url diffHunk pullRequestReview { id } } }
+  } }
+  author { login avatarUrl(size: 80) }
+  repository { nameWithOwner autoMergeAllowed mergeCommitAllowed squashMergeAllowed rebaseMergeAllowed viewerDefaultMergeMethod }
+  labels(first: 20) { nodes { name color } }
+  assignees(first: 10) { nodes { login avatarUrl(size: 80) } }
+  reviewRequests(first: 20) { nodes { requestedReviewer {
+    ... on User { login avatarUrl(size: 80) } ... on Team { name } } } }
+  comments(first: 100) { nodes { author { login avatarUrl(size: 80) } body createdAt url } }
+  reviews(first: 100) { nodes {
+    id author { login avatarUrl(size: 80) } body state submittedAt url
+  } }
+  commits(last: 100) { totalCount nodes { commit {
+    oid abbreviatedOid messageHeadline messageBody committedDate
+    author { name user { login avatarUrl(size: 80) } }
+    statusCheckRollup { state }
+    signature { isValid }
+  } } }
+  timelineItems(last: 100, itemTypes: [MERGED_EVENT, CLOSED_EVENT, REOPENED_EVENT, HEAD_REF_DELETED_EVENT,
+      HEAD_REF_FORCE_PUSHED_EVENT, READY_FOR_REVIEW_EVENT, CONVERT_TO_DRAFT_EVENT, REVIEW_REQUESTED_EVENT,
+      LABELED_EVENT, UNLABELED_EVENT, ASSIGNED_EVENT, AUTO_MERGE_ENABLED_EVENT, AUTO_MERGE_DISABLED_EVENT,
+      PULL_REQUEST_COMMIT]) { nodes {
+    __typename
+    ... on MergedEvent { createdAt actor { login avatarUrl(size: 40) } mergeRefName commit { oid abbreviatedOid } }
+    ... on ClosedEvent { createdAt actor { login avatarUrl(size: 40) } }
+    ... on ReopenedEvent { createdAt actor { login avatarUrl(size: 40) } }
+    ... on HeadRefDeletedEvent { createdAt actor { login avatarUrl(size: 40) } headRefName }
+    ... on HeadRefForcePushedEvent { createdAt actor { login avatarUrl(size: 40) }
+      beforeCommit { oid abbreviatedOid } afterCommit { oid abbreviatedOid } }
+    ... on ReadyForReviewEvent { createdAt actor { login avatarUrl(size: 40) } }
+    ... on ConvertToDraftEvent { createdAt actor { login avatarUrl(size: 40) } }
+    ... on ReviewRequestedEvent { createdAt actor { login avatarUrl(size: 40) }
+      requestedReviewer { ... on User { login avatarUrl(size: 40) } ... on Team { name } } }
+    ... on LabeledEvent { createdAt actor { login avatarUrl(size: 40) } label { name color } }
+    ... on UnlabeledEvent { createdAt actor { login avatarUrl(size: 40) } label { name color } }
+    ... on AssignedEvent { createdAt actor { login avatarUrl(size: 40) } assignee { ... on User { login avatarUrl(size: 40) } } }
+    ... on AutoMergeEnabledEvent { createdAt actor { login avatarUrl(size: 40) } }
+    ... on AutoMergeDisabledEvent { createdAt actor { login avatarUrl(size: 40) } }
+    ... on PullRequestCommit { commit { oid abbreviatedOid messageHeadline committedDate
+      statusCheckRollup { state } author { name user { login avatarUrl(size: 40) } } } }
+  } }
+  head: commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { nodes {
+    __typename
+    ... on CheckRun { name status conclusion detailsUrl title startedAt completedAt isRequired(PR_ARG)
+      checkSuite { app { logoUrl(size: 40) } workflowRun { event workflow { name } } } }
+    ... on StatusContext { context state targetUrl description avatarUrl(size: 40) isRequired(PR_ARG) }
+  } } } } } }
+"#;
+
+fn parse_detail(node: Value) -> Result<PrDetail> {
+    let checks = parse_checks(&node["head"]);
+    let mut d: PrDetail = serde_json::from_value(node).map_err(|e| Error::Other(format!("Unexpected response: {e}")))?;
+    d.checks = checks;
+    Ok(d)
 }

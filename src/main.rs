@@ -29,6 +29,8 @@ fn main() -> eframe::Result {
         snapshot::run(&path);
         return Ok(());
     }
+    #[cfg(target_os = "macos")]
+    macos::listen_for_links();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Pull requests")

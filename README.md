@@ -26,7 +26,7 @@ flox install github:natejsimonsen/github-rs
 ```
 
 This builds the app from source the first time (a few minutes) and puts
-`github-prs` on your path. Run it with `github-prs`.
+`github-prs` on your path (plus `GitHub PRs.app` on macOS). Run it with `github-prs`.
 
 **macOS or Linux, with Nix** (flakes enabled):
 
@@ -95,6 +95,33 @@ Linux binary, and publishes them on the Releases page. The Homebrew tap
 checks for new releases every few hours and updates its cask; run its
 "Update cask" workflow to do it right away. Flox and Nix build from the
 latest commit on `main`; `flox upgrade` picks up a new release.
+
+## Open PR links in the app (macOS)
+
+macOS sends every web link to one default browser. [Finicky](https://github.com/johnste/finicky)
+takes that slot and picks an app per link:
+
+```sh
+brew install --cask finicky
+```
+
+Save as `~/.finicky.js`, open Finicky, and accept it as the default browser:
+
+```js
+export default {
+  defaultBrowser: "Google Chrome", // where every other link goes
+  handlers: [
+    // "Open on GitHub" in the app goes to the browser, not back to the app.
+    { match: (url, { opener }) => opener?.bundleId === "dev.github-prs", browser: "Google Chrome" },
+    { match: /^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/\d+/, browser: "GitHub PRs" },
+  ],
+};
+```
+
+This needs `GitHub PRs.app`. Homebrew, the download and `scripts/bundle-macos.sh`
+install it in /Applications. Flox and Nix put it in the profile's `Applications`
+folder; open it once so macOS knows it. Without Finicky,
+`open "github-prs://github.com/owner/repo/pull/123"` opens a PR in the app.
 
 ## Signing in
 
@@ -170,8 +197,10 @@ On Windows and Linux, use `Ctrl` instead of `⌘`. Double-click a PR to open it 
 | `src/images.rs` | Downloads avatars, images in comments, and emoji |
 | `src/gfm.rs` | GitHub's Markdown extras: mentions, #refs, emoji |
 | `src/syntax.rs` | Syntax highlighting (tree-sitter grammars via arborium) |
+| `src/macos.rs` | Window buttons, and PR links macOS hands the app |
 | `src/snapshot.rs` | Offscreen screenshots for UI reviews (optional feature) |
 | `scripts/bundle-macos.sh` | Builds and installs the macOS `.app` |
+| `macos/Info.plist` | The `.app`'s info, including the `github-prs://` link type |
 | `examples/make_icon.rs` | Draws the app icon |
 | `flake.nix`, `nix/` | Nix package and dev shell (Flox installs from these) |
 | `.flox/` | Flox dev environment |

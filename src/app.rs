@@ -64,6 +64,8 @@ pub enum Msg {
     Found {
         seq: u64,
         result: github::Result<PrSummary>,
+        /// Its detail and files are already on the way.
+        preloading: bool,
     },
     /// A file's full text, for showing more diff context.
     FileText {
@@ -236,6 +238,8 @@ pub enum Action {
     SetPreview(bool),
     /// ⌘K: open or close the "Go to pull request" box.
     ToggleGoTo,
+    /// Open a pull request link handed to the app by the OS.
+    OpenLink(String),
     /// Open the PR typed in that box.
     GoTo,
     /// Put a comment into the main comment box as a > quote.
@@ -394,6 +398,8 @@ impl App {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         crate::images::HttpLoader::install(&cc.egui_ctx);
         crate::images::EmojiLoader::install(&cc.egui_ctx);
+        #[cfg(target_os = "macos")]
+        crate::macos::wake_on_link(&cc.egui_ctx);
 
         let (tx, rx) = channel();
         let app = App {
@@ -954,11 +960,16 @@ impl App {
                     Err(e) => self.show_toast(format!("{what} failed: {e}"), true),
                 }
             }
-            Msg::Found { seq, result } => {
+            Msg::Found { seq, result, preloading } => {
                 let Some(g) = self.goto.as_mut().filter(|g| g.seq == seq) else { return };
                 match result {
                     Ok(pr) => {
                         self.goto = None;
+                        if preloading {
+                            // So selecting it doesn't fetch them a second time.
+                            self.details.entry(pr.id.clone()).or_default().loading = true;
+                            self.files.entry(pr.id.clone()).or_default().loading = true;
+                        }
                         self.actions.push(Action::Select(pr));
                     }
                     Err(e) => {
@@ -1310,6 +1321,12 @@ impl App {
             Action::ClosePr => {
                 self.merge_action("Pull request closed", |c, d| c.close_pull_request(&d.id));
             }
+            Action::OpenLink(url) => {
+                // Same path as typing the link in the go-to box, which also
+                // shows why if it isn't a PR link.
+                self.goto = Some(GoTo { text: url, ..Default::default() });
+                self.apply(Action::GoTo, ctx);
+            }
             Action::ToggleGoTo => {
                 self.goto = if self.goto.is_some() { None } else { Some(GoTo::default()) };
             }
@@ -1340,9 +1357,31 @@ impl App {
                 g.seq = seq;
                 g.loading = true;
                 g.error = None;
+                let ctx = self.ctx.clone();
                 self.spawn(move |c, tx| {
-                    let result = c.pull_request(&repo, number);
-                    let _ = tx.send(Msg::Found { seq, result });
+                    // Fetch the PR page and its files alongside the lookup,
+                    // not after it: the page query alone takes ~2 seconds.
+                    std::thread::scope(|s| {
+                        let detail = s.spawn(|| c.detail_by_number(&repo, number));
+                        let files = s.spawn(|| c.files(&repo, number));
+                        let result = c.pull_request(&repo, number);
+                        let id = result.as_ref().ok().map(|pr| pr.id.clone());
+                        let _ = tx.send(Msg::Found { seq, result, preloading: id.is_some() });
+                        ctx.request_repaint();
+                        let Some(id) = id else { return };
+                        let failed = || github::Error::Other("Loading failed.".into());
+                        let result = detail.join().unwrap_or_else(|_| Err(failed()));
+                        if let Ok(d) = &result {
+                            cache::store(&format!("detail-{id}"), d);
+                        }
+                        let _ = tx.send(Msg::Detail { id: id.clone(), result, stale: false });
+                        ctx.request_repaint();
+                        let result = files.join().unwrap_or_else(|_| Err(failed()));
+                        if let Ok(f) = &result {
+                            cache::store(&format!("files-{id}"), f);
+                        }
+                        let _ = tx.send(Msg::Files { id, result, stale: false });
+                    });
                 });
             }
             Action::ExpandHunk(path, idx, amount) => {
@@ -1688,6 +1727,9 @@ impl eframe::App for App {
         ctx.request_repaint_after(AUTO_REFRESH);
 
         if self.client.is_some() {
+            // Links wait in the queue until you've signed in.
+            #[cfg(target_os = "macos")]
+            self.actions.extend(crate::macos::take_links().into_iter().map(Action::OpenLink));
             self.follow_list();
             self.shortcuts(&ctx);
             views::main(self, ui);

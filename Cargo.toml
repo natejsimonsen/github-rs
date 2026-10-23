@@ -28,10 +28,11 @@ egui_kittest = { version = "0.36", features = ["wgpu", "eframe"], optional = tru
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }
 webbrowser = "1"
-# Moves the window buttons to line up with the app's header.
+# Moves the window buttons to line up with the app's header, and takes
+# links macOS hands the app.
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry", "NSString"] }
 raw-window-handle = "0.6"
 
 [target.'cfg(target_os = "windows")'.dependencies]
