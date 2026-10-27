@@ -2,8 +2,8 @@
 //! send a `Msg` back over a channel; the UI never waits on the network.
 
 use crate::auth::{self, Source};
-use crate::github::{self, Client, CommitDetail, FileDiff, ListResult, PrDetail, PrSummary, SECTIONS};
-use crate::{cache, diff, theme, util, views};
+use crate::github::{self, Client, CommitDetail, Compare, FileDiff, ListResult, PrDetail, PrSummary, SECTIONS};
+use crate::{cache, diff, seen, theme, util, views};
 use egui::{Key, KeyboardShortcut, Modifiers};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -54,6 +54,13 @@ pub enum Msg {
     Commit {
         key: String,
         result: github::Result<CommitDetail>,
+    },
+    /// The changes between two commits, keyed by `compare_key`. `pr_id` is
+    /// the PR they belong to.
+    Compare {
+        key: String,
+        pr_id: String,
+        result: github::Result<Compare>,
     },
     Posted {
         id: String,
@@ -127,11 +134,13 @@ pub struct Panels {
     pub details: bool,
     /// The file list next to the diff.
     pub tree: bool,
+    /// Diffs show one file at a time instead of all of them.
+    pub one_file: bool,
 }
 
 impl Default for Panels {
     fn default() -> Self {
-        Panels { list: true, details: true, tree: true }
+        Panels { list: true, details: true, tree: true, one_file: false }
     }
 }
 
@@ -142,19 +151,29 @@ pub enum Panel {
     Tree,
 }
 
-/// A commit opened from the PR, shown in place of the PR's tabs.
+/// A commit opened from the PR, shown in place of the PR's tabs. With a
+/// `base`, it's the changes from `base` to `oid` instead: a range of the
+/// PR's commits, or both sides of a force push.
 #[derive(Clone, PartialEq, Debug)]
 pub struct CommitPage {
     pub repo: String,
     pub oid: String,
+    pub base: Option<String>,
     /// The tab to return to.
     pub from: Tab,
 }
 
 impl CommitPage {
     pub fn key(&self) -> String {
-        format!("commit-{}-{}", self.repo, self.oid)
+        match &self.base {
+            Some(base) => compare_key(&self.repo, base, &self.oid),
+            None => format!("commit-{}-{}", self.repo, self.oid),
+        }
     }
+}
+
+pub fn compare_key(repo: &str, base: &str, head: &str) -> String {
+    format!("compare-{repo}-{base}-{head}")
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -163,6 +182,8 @@ pub enum Tab {
     Commits,
     Checks,
     Files,
+    /// What changed since you last looked.
+    New,
 }
 
 /// Data that loads in the background. `data` can be stale (from the disk
@@ -212,6 +233,26 @@ pub enum Action {
     Tab(Tab),
     /// Show a commit's page: (repo, sha).
     OpenCommit(String, String),
+    /// Show the changes between two commits: (repo, base, head).
+    OpenRange(String, String, String),
+    /// Tick or untick a commit as reviewed (kept on this computer).
+    SetReviewed(String, bool),
+    /// Count everything on the selected PR as seen, so New starts over.
+    MarkSeen,
+    /// Diffs: one file at a time (true), or all of them.
+    SetOneFile(bool),
+    /// One file at a time: show this file.
+    FocusFile(String),
+    /// The next (1) or previous (-1) file in the diff on screen.
+    StepFile(i64),
+    /// The next file you haven't ticked "Viewed" on.
+    NextUnviewed,
+    /// Tick or untick "Viewed" on the file on screen (v).
+    ToggleViewedHere,
+    /// On a commit's page: the next (1) or previous (-1) commit.
+    StepCommit(i64),
+    /// On a commit's page: tick it reviewed and go to the next one that isn't.
+    ReviewedNext,
     /// Back from a commit's page to the PR.
     CloseCommit,
     Refresh,
@@ -302,6 +343,19 @@ pub struct App {
     pub commit: Option<CommitPage>,
     /// Commits opened so far, by `CommitPage::key`.
     pub commits: HashMap<String, Loaded<CommitDetail>>,
+    /// Changes between two commits, by `compare_key`.
+    pub compares: HashMap<String, Loaded<Compare>>,
+    /// What you've looked at, for the New tab and the list's "new" notes.
+    pub seen: seen::Seen,
+    /// The PR you've looked at code on during this visit, and its head then.
+    /// Saved as seen when you move on, so New stays put while you read it.
+    visited: Option<(String, String)>,
+    /// The New tab's diff on screen: (state key, repo, head).
+    pub new_target: Option<(String, String, String)>,
+    /// One file at a time: the file shown, by diff state key.
+    pub file_focus: HashMap<String, String>,
+    /// The first commit of a range, picked with a shift-click.
+    pub range_start: Option<String>,
     pub diff_layouts: HashMap<String, Arc<diff::Layout>>,
     /// Files you opened or closed by hand, keyed by (PR id, path). Other
     /// files start closed if they're marked viewed, like on GitHub.
@@ -426,6 +480,12 @@ impl App {
             tab: Tab::Conversation,
             commit: None,
             commits: HashMap::new(),
+            compares: HashMap::new(),
+            seen: seen::load(),
+            visited: None,
+            new_target: None,
+            file_focus: HashMap::new(),
+            range_start: None,
             diff_layouts: HashMap::new(),
             collapsed: HashMap::new(),
             viewed_pending: HashMap::new(),
@@ -475,7 +535,12 @@ impl App {
         let mut app = app;
         if app.shot.is_some() {
             let collapse = std::env::var("GITHUB_PRS_COLLAPSE").unwrap_or_default();
-            app.panels = Panels { list: !collapse.contains("list"), details: !collapse.contains("details"), tree: !collapse.contains("tree") };
+            app.panels = Panels {
+                list: !collapse.contains("list"),
+                details: !collapse.contains("details"),
+                tree: !collapse.contains("tree"),
+                one_file: std::env::var_os("GITHUB_PRS_ONE_FILE").is_some(),
+            };
         }
         match std::env::var("GITHUB_PRS_THEME").as_deref() {
             Ok("dark") => cc.egui_ctx.set_theme(egui::Theme::Dark),
@@ -714,6 +779,7 @@ impl App {
                 Msg::Detail { stale, .. } => ("detail", *stale),
                 Msg::Files { stale, .. } => ("files", *stale),
                 Msg::Commit { .. } => ("commit", false),
+                Msg::Compare { .. } => ("compare", false),
                 Msg::Posted { .. } => ("posted", false),
                 Msg::Viewed { .. } => ("viewed", false),
                 Msg::Found { .. } => ("found", false),
@@ -894,7 +960,7 @@ impl App {
                 if let Ok(files) = &mut result {
                     crate::diff::sort_like_tree(files);
                 }
-                self.diff_layouts.remove(&id);
+                self.drop_layouts(&id);
                 self.files.entry(id.clone()).or_default().apply(result, stale);
                 let pending: Vec<(String, bool)> = self.viewed_pending.iter().filter(|((i, _), _)| *i == id).map(|((_, p), v)| (p.clone(), *v)).collect();
                 for (path, v) in pending {
@@ -909,19 +975,36 @@ impl App {
                     crate::diff::sort_like_tree(Arc::make_mut(&mut c.files).as_mut_slice());
                     cache::store(&key, c);
                 }
-                self.diff_layouts.remove(&key);
+                self.drop_layouts(&key);
                 self.commits.entry(key).or_default().apply(result, false);
+            }
+            Msg::Compare { key, pr_id, mut result } => {
+                if let Err(e) = &result {
+                    self.on_error(e);
+                }
+                if let Ok(c) = &mut result {
+                    // After a rebase the comparison also holds the base
+                    // branch's changes. Keep only files this PR touches.
+                    if c.status == "diverged"
+                        && let Some(pr_files) = self.files.get(&pr_id).and_then(|f| f.data.clone())
+                    {
+                        Arc::make_mut(&mut c.files).retain(|f| pr_files.iter().any(|p| p.filename == f.filename));
+                    }
+                    cache::store(&key, c);
+                }
+                self.drop_layouts(&key);
+                self.compares.entry(key).or_default().apply(result, false);
             }
             Msg::FileText { pr_id, path, result } => match result {
                 Ok(text) => {
                     let lines: Vec<String> = text.lines().map(str::to_string).collect();
                     self.file_texts.insert((pr_id.clone(), path), Some(Arc::new(lines)));
-                    self.diff_layouts.remove(&pr_id);
+                    self.drop_layouts(&pr_id);
                 }
                 Err(e) => {
                     self.file_texts.remove(&(pr_id.clone(), path.clone()));
                     self.expanded.remove(&(pr_id.clone(), path));
-                    self.diff_layouts.remove(&pr_id);
+                    self.drop_layouts(&pr_id);
                     self.show_toast(format!("Couldn't load the file: {e}"), true);
                 }
             },
@@ -1054,16 +1137,24 @@ impl App {
         if let Some(c) = &self.commit {
             return Some((c.key(), c.repo.clone(), c.oid.clone()));
         }
+        if self.tab == Tab::New {
+            return self.new_target.clone();
+        }
         let pr = self.selected.as_ref()?;
         let head = self.details.get(&pr.id).and_then(|d| d.data.as_ref()).map(|d| d.head_ref_oid.clone()).unwrap_or_default();
         Some((pr.id.clone(), pr.repository.name_with_owner.clone(), head))
     }
 
-    fn open_commit(&mut self, repo: String, oid: String) {
+    fn open_commit(&mut self, repo: String, oid: String, base: Option<String>) {
         let from = self.commit.as_ref().map(|c| c.from).unwrap_or(self.tab);
-        let page = CommitPage { repo, oid, from };
+        let page = CommitPage { repo, oid, base, from };
         let key = page.key();
         self.commit = Some(page.clone());
+        self.note_visit();
+        if let Some(base) = &page.base {
+            self.ensure_compare(&page.repo, base, &page.oid);
+            return;
+        }
         let entry = self.commits.entry(key.clone()).or_default();
         if entry.data.is_some() || entry.loading {
             return;
@@ -1078,6 +1169,98 @@ impl App {
             let result = c.commit(&page.repo, &page.oid);
             let _ = tx.send(Msg::Commit { key, result });
         });
+    }
+
+    /// Start loading the changes from `base` to `head`, unless they're here
+    /// already. Returns their state key.
+    pub fn ensure_compare(&mut self, repo: &str, base: &str, head: &str) -> String {
+        let key = compare_key(repo, base, head);
+        let entry = self.compares.entry(key.clone()).or_default();
+        if entry.data.is_some() || entry.loading || entry.error.is_some() {
+            return key;
+        }
+        // Commits never change, so neither does what's between two of them.
+        if let Some(cached) = cache::load::<Compare>(&key) {
+            entry.apply(Ok(cached), false);
+            return key;
+        }
+        entry.loading = true;
+        let pr_id = self.selected.as_ref().map(|p| p.id.clone()).unwrap_or_default();
+        let (repo, base, head, k) = (repo.to_string(), base.to_string(), head.to_string(), key.clone());
+        self.spawn(move |c, tx| {
+            let result = c.compare(&repo, &base, &head);
+            let _ = tx.send(Msg::Compare { key: k, pr_id, result });
+        });
+        key
+    }
+
+    /// Try a failed comparison again.
+    pub fn retry_compare(&mut self, key: &str) {
+        self.compares.remove(key);
+    }
+
+    /// Forget the drawn diff for a state key, including its one-file views.
+    fn drop_layouts(&mut self, key: &str) {
+        let prefix = format!("{key}\0");
+        self.diff_layouts.retain(|k, _| k != key && !k.starts_with(&prefix));
+    }
+
+    /// The files of the diff with this state key: a PR's, a commit's, or a comparison's.
+    pub fn diff_files(&self, key: &str) -> Option<Arc<Vec<FileDiff>>> {
+        if let Some(f) = self.files.get(key).and_then(|f| f.data.as_ref()) {
+            return Some(f.clone());
+        }
+        if let Some(c) = self.commits.get(key).and_then(|c| c.data.as_ref()) {
+            return Some(c.files.clone());
+        }
+        self.compares.get(key).and_then(|c| c.data.as_ref()).map(|c| c.files.clone())
+    }
+
+    /// The file on screen in a diff: the one shown alone, or the one at the top.
+    pub fn current_file(&self, key: &str) -> Option<usize> {
+        let files = self.diff_files(key)?;
+        if self.panels.one_file {
+            return Some(self.file_focus.get(key).and_then(|p| files.iter().position(|f| &f.filename == p)).unwrap_or_else(|| first_unviewed(&files)));
+        }
+        self.ctx.data(|d| d.get_temp::<usize>(egui::Id::new(("diff-current", key))))
+    }
+
+    /// Show file `i` of a diff: on its own, or scrolled to the top.
+    fn go_to_file(&mut self, key: &str, i: usize) {
+        let Some(files) = self.diff_files(key) else { return };
+        let Some(f) = files.get(i) else { return };
+        if self.panels.one_file {
+            self.file_focus.insert(key.to_string(), f.filename.clone());
+        } else if let Some(top) = self.diff_layouts.get(key).and_then(|l| l.file_top(i)) {
+            self.ctx.data_mut(|d| d.insert_temp(egui::Id::new(("diff-jump", key)), top));
+        }
+    }
+
+    /// The selected PR's head commit, once its details are in.
+    fn selected_head(&self) -> Option<(String, String)> {
+        let pr = self.selected.as_ref()?;
+        let head = self.details.get(&pr.id)?.data.as_ref()?.head_ref_oid.clone();
+        (!head.is_empty()).then(|| (pr.id.clone(), head))
+    }
+
+    /// You're looking at the selected PR's code.
+    pub fn note_visit(&mut self) {
+        if let Some(v) = self.selected_head() {
+            self.visited = Some(v);
+        }
+    }
+
+    /// Save the visit as seen, now that you've moved on.
+    fn end_visit(&mut self) {
+        if let Some((id, head)) = self.visited.take() {
+            self.seen.prs.insert(id, seen::Mark::now(&head));
+            seen::save(&self.seen);
+        }
+    }
+
+    /// What's new on a PR since you last looked, if you've looked before.
+    pub fn news<'a>(&self, d: &'a PrDetail) -> Option<seen::News<'a>> {
+        seen::news(self.seen.prs.get(&d.id), d, &self.viewer)
     }
 
     pub fn expansion(&self, pr_id: &str, path: &str) -> diff::Expansion {
@@ -1098,8 +1281,9 @@ impl App {
         let Some(data) = self.files.get_mut(pr_id).and_then(|f| f.data.as_mut()) else { return };
         if let Some(f) = Arc::make_mut(data).iter_mut().find(|f| f.filename == path) {
             f.viewed = viewed;
+            f.stale_view = false;
         }
-        self.diff_layouts.remove(pr_id);
+        self.drop_layouts(pr_id);
     }
 
     pub fn show_toast(&mut self, text: String, error: bool) {
@@ -1194,16 +1378,115 @@ impl App {
             Action::Select(pr) => {
                 self.load_detail(&pr, false);
                 if self.selected.as_ref().map(|p| &p.id) != Some(&pr.id) {
+                    self.end_visit();
                     self.composer.clear();
                     self.commit = None;
+                    self.range_start = None;
+                    // New belongs to one PR; another PR may have nothing new.
+                    if self.tab == Tab::New {
+                        self.tab = Tab::Conversation;
+                    }
                 }
                 self.selected = Some(pr);
             }
             Action::Tab(t) => {
                 self.tab = t;
                 self.commit = None;
+                if matches!(t, Tab::Files | Tab::New) {
+                    self.note_visit();
+                }
             }
-            Action::OpenCommit(repo, oid) => self.open_commit(repo, oid),
+            Action::OpenCommit(repo, oid) => self.open_commit(repo, oid, None),
+            Action::OpenRange(repo, base, head) => self.open_commit(repo, head, Some(base)),
+            Action::SetReviewed(oid, on) => {
+                if on {
+                    self.seen.reviewed.insert(oid);
+                } else {
+                    self.seen.reviewed.remove(&oid);
+                }
+                seen::save(&self.seen);
+            }
+            Action::MarkSeen => {
+                self.visited = None;
+                if let Some((id, head)) = self.selected_head() {
+                    self.seen.prs.insert(id, seen::Mark::now(&head));
+                    seen::save(&self.seen);
+                    self.tab = Tab::Conversation;
+                    self.show_toast("Marked as seen".into(), false);
+                }
+            }
+            Action::SetOneFile(on) => {
+                // Stay on the file you were looking at.
+                let here = self.diff_target().and_then(|(key, _, _)| Some((self.current_file(&key)?, key)));
+                self.panels.one_file = on;
+                if let Some((i, key)) = here {
+                    self.go_to_file(&key, i);
+                }
+            }
+            Action::FocusFile(path) => {
+                if let Some((key, _, _)) = self.diff_target() {
+                    self.file_focus.insert(key, path);
+                }
+            }
+            Action::StepFile(delta) => {
+                let Some((key, _, _)) = self.diff_target() else { return };
+                let Some(n) = self.diff_files(&key).map(|f| f.len()).filter(|n| *n > 0) else { return };
+                let at = self.current_file(&key).unwrap_or(0) as i64;
+                self.go_to_file(&key, (at + delta).clamp(0, n as i64 - 1) as usize);
+            }
+            Action::NextUnviewed => {
+                let Some((key, _, _)) = self.diff_target() else { return };
+                let Some(files) = self.diff_files(&key) else { return };
+                let at = self.current_file(&key).unwrap_or(0);
+                if let Some(i) = next_unviewed(&files, at) {
+                    self.go_to_file(&key, i);
+                }
+            }
+            Action::ToggleViewedHere => {
+                let Some((key, _, _)) = self.diff_target() else { return };
+                // Viewed belongs to the PR's own diff only.
+                if self.commit.is_some() || self.tab != Tab::Files {
+                    return;
+                }
+                let Some(files) = self.diff_files(&key) else { return };
+                let Some(i) = self.current_file(&key) else { return };
+                let Some(f) = files.get(i) else { return };
+                let viewed = !f.viewed;
+                self.apply(Action::SetViewed(f.filename.clone(), viewed), ctx);
+                // Done with this one: on to the next, like GitHub's review flow.
+                if viewed
+                    && self.panels.one_file
+                    && let Some(next) = next_unviewed(&files, i)
+                {
+                    self.go_to_file(&key, next);
+                }
+            }
+            Action::StepCommit(delta) => {
+                let Some(page) = self.commit.clone().filter(|c| c.base.is_none()) else { return };
+                let Some(d) = self.selected.as_ref().and_then(|p| self.details.get(&p.id)).and_then(|d| d.data.clone()) else { return };
+                let nodes = &d.commits.nodes;
+                let Some(at) = nodes.iter().position(|n| n.commit.oid == page.oid) else { return };
+                let to = at as i64 + delta;
+                if to >= 0 && (to as usize) < nodes.len() {
+                    self.open_commit(page.repo, nodes[to as usize].commit.oid.clone(), None);
+                }
+            }
+            Action::ReviewedNext => {
+                let Some(page) = self.commit.clone().filter(|c| c.base.is_none()) else { return };
+                self.seen.reviewed.insert(page.oid.clone());
+                seen::save(&self.seen);
+                let Some(d) = self.selected.as_ref().and_then(|p| self.details.get(&p.id)).and_then(|d| d.data.clone()) else { return };
+                let nodes = &d.commits.nodes;
+                let at = nodes.iter().position(|n| n.commit.oid == page.oid).unwrap_or(0);
+                let next = nodes.iter().skip(at + 1).chain(nodes.iter().take(at)).find(|n| !self.seen.reviewed.contains(&n.commit.oid));
+                match next {
+                    Some(n) => self.open_commit(page.repo, n.commit.oid.clone(), None),
+                    None => {
+                        self.show_toast("All commits reviewed".into(), false);
+                        self.apply(Action::CloseCommit, ctx);
+                    }
+                }
+            }
             Action::CloseCommit => {
                 if let Some(c) = self.commit.take() {
                     self.tab = c.from;
@@ -1262,7 +1545,7 @@ impl App {
                 if let Some((key, _, _)) = self.diff_target() {
                     let now = self.is_collapsed(&key, &name);
                     self.collapsed.insert((key.clone(), name), !now);
-                    self.diff_layouts.remove(&key);
+                    self.drop_layouts(&key);
                 }
             }
             Action::QuoteReply(body) => {
@@ -1388,7 +1671,7 @@ impl App {
                 let Some((id, repo, head)) = self.diff_target() else { return };
                 let key = (id.clone(), path.clone());
                 *self.expanded.entry(key.clone()).or_default().entry(idx).or_default() += amount;
-                self.diff_layouts.remove(&id);
+                self.drop_layouts(&id);
                 if let std::collections::hash_map::Entry::Vacant(e) = self.file_texts.entry(key) {
                     if head.is_empty() {
                         return;
@@ -1485,12 +1768,13 @@ impl App {
             }
             // ⌘B: PR list. ⇧⌘B: the side panel of the current tab.
             if i.consume_shortcut(&cmd_shift(Key::B)) {
-                acts.push(Action::TogglePanel(if self.tab == Tab::Files || self.commit.is_some() { Panel::Tree } else { Panel::Details }));
+                acts.push(Action::TogglePanel(if matches!(self.tab, Tab::Files | Tab::New) || self.commit.is_some() { Panel::Tree } else { Panel::Details }));
             }
             if i.consume_shortcut(&cmd(Key::B)) {
                 acts.push(Action::TogglePanel(Panel::List));
             }
-            for (k, t) in [(Key::Num1, Tab::Conversation), (Key::Num2, Tab::Commits), (Key::Num3, Tab::Checks), (Key::Num4, Tab::Files)] {
+            for (k, t) in [(Key::Num1, Tab::Conversation), (Key::Num2, Tab::Commits), (Key::Num3, Tab::Checks), (Key::Num4, Tab::Files), (Key::Num5, Tab::New)]
+            {
                 if i.consume_shortcut(&cmd(k)) {
                     acts.push(Action::Tab(t));
                 }
@@ -1526,6 +1810,37 @@ impl App {
                     plain && i.key_pressed(Key::Escape),
                 )
             });
+            // Review keys, while a diff is on screen: n / p next and previous
+            // file, u next unviewed, v viewed (on a commit: reviewed, then
+            // the next commit), [ and ] previous and next commit.
+            let on_diff = self.commit.is_some() || matches!(self.tab, Tab::Files | Tab::New);
+            if on_diff && self.selected.is_some() {
+                let (next, prev, unviewed, viewed, back, fwd) = ctx.input(|i| {
+                    let plain = i.modifiers.is_none();
+                    (
+                        plain && i.key_pressed(Key::N),
+                        plain && i.key_pressed(Key::P),
+                        plain && i.key_pressed(Key::U),
+                        plain && i.key_pressed(Key::V),
+                        i.key_pressed(Key::OpenBracket),
+                        i.key_pressed(Key::CloseBracket),
+                    )
+                });
+                let on_commit = self.commit.as_ref().is_some_and(|c| c.base.is_none());
+                for (hit, act) in [
+                    (next, Action::StepFile(1)),
+                    (prev, Action::StepFile(-1)),
+                    (unviewed, Action::NextUnviewed),
+                    (viewed && on_commit, Action::ReviewedNext),
+                    (viewed && !on_commit, Action::ToggleViewedHere),
+                    (back, Action::StepCommit(-1)),
+                    (fwd, Action::StepCommit(1)),
+                ] {
+                    if hit {
+                        self.actions.push(act);
+                    }
+                }
+            }
             // Esc leaves a commit page, unless it's closing the floating
             // file tree or the ⌘K box first.
             if escape && self.commit.is_some() && self.goto.is_none() && !(self.tree_narrow && self.tree_open_narrow) {
@@ -1569,6 +1884,7 @@ impl App {
                     Ok("commits") => Tab::Commits,
                     Ok("checks") => Tab::Checks,
                     Ok("files") => Tab::Files,
+                    Ok("new") => Tab::New,
                     _ => Tab::Conversation,
                 };
                 self.goto = Some(GoTo { text, ..Default::default() });
@@ -1589,6 +1905,7 @@ impl App {
                 Ok("commits") => Tab::Commits,
                 Ok("checks") => Tab::Checks,
                 Ok("files") => Tab::Files,
+                Ok("new") => Tab::New,
                 _ => Tab::Conversation,
             };
             shot.selected = true;
@@ -1708,6 +2025,12 @@ impl eframe::App for App {
         }
     }
 
+    fn on_exit(&mut self) {
+        if self.shot.is_none() {
+            self.end_visit();
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         #[cfg(target_os = "macos")]
         crate::macos::place_traffic_lights(frame);
@@ -1767,6 +2090,17 @@ impl eframe::App for App {
             eprintln!("frame {:>5.1} ms  tab={:?}", ms, self.tab);
         }
     }
+}
+
+/// The first file you haven't ticked "Viewed" on, else the first file.
+pub fn first_unviewed(files: &[FileDiff]) -> usize {
+    files.iter().position(|f| !f.viewed).unwrap_or(0)
+}
+
+/// The next file after `at` you haven't ticked "Viewed" on, wrapping around.
+pub fn next_unviewed(files: &[FileDiff], at: usize) -> Option<usize> {
+    let n = files.len();
+    (1..n).map(|k| (at + k) % n).find(|&i| !files[i].viewed)
 }
 
 /// GitHub's search can list a PR that was closed a moment ago under

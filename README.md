@@ -123,6 +123,27 @@ install it in /Applications. Flox and Nix put it in the profile's `Applications`
 folder; open it once so macOS knows it. Without Finicky,
 `open "github-prs://github.com/owner/repo/pull/123"` opens a PR in the app.
 
+## Reviewing
+
+- **New** (`⌘5`): what changed since you last looked. It starts from your
+  last visit to the PR's code in this app, or the commit of your last review
+  on GitHub, whichever is later. It lists new commits and comments, then one
+  diff from there to now. The PR list notes "3 new commits" too. Press
+  "Mark as seen" to start over.
+- **One file at a time**: the "One file" button above any diff. `n` / `p`
+  move between files, `u` jumps to the next file you haven't viewed, and `v`
+  marks the file viewed and moves on.
+- **Changed since viewed**: files you marked viewed that changed after get a
+  yellow dot in the file list and a note in their header.
+- **Commit by commit**: "Review commit by commit" on the Commits tab opens
+  the first commit you haven't ticked. `v` ticks it and opens the next one.
+  `[` and `]` step through commits.
+- **Ranges**: shift-click two commits to see the changes between them. A
+  force push in the timeline has a "Compare" link for its two sides.
+
+"Seen" and "reviewed" are kept on this computer, in `seen.json` next to
+`settings.json`. "Viewed" is GitHub's own, so it follows you.
+
 ## Signing in
 
 The app finds a token in this order:
@@ -145,7 +166,11 @@ To sign out, right-click your avatar (top right), or delete that file.
 | Keys | Action |
 | --- | --- |
 | `↑` `↓` or `j` `k` | Previous / next PR |
-| `⌘1` – `⌘4` | Conversation, Commits, Checks, Files changed |
+| `⌘1` – `⌘5` | Conversation, Commits, Checks, Files changed, New |
+| `n` `p` | Next / previous file in a diff |
+| `u` | Next file you haven't viewed |
+| `v` | Mark the file viewed (on a commit: reviewed, then the next commit) |
+| `[` `]` | Previous / next commit, on a commit's page |
 | `⌘B` | Show or hide the PR list |
 | `⇧⌘B` | Show or hide the details column / file list |
 | `⌘R` | Refresh |
@@ -190,6 +215,7 @@ On Windows and Linux, use `Ctrl` instead of `⌘`. Double-click a PR to open it 
 | `src/github.rs` | GitHub API calls and data types |
 | `src/auth.rs` | Finds and saves the token |
 | `src/cache.rs` | Disk cache |
+| `src/seen.rs` | What you've seen and reviewed, for the New tab |
 | `src/theme.rs` | GitHub's colors (light and dark) and system fonts |
 | `src/icons.rs` | Octicon-style icons, drawn as shapes |
 | `src/views/` | The list and PR page |
@@ -210,7 +236,8 @@ On Windows and Linux, use `Ctrl` instead of `⌘`. Double-click a PR to open it 
 
 - `GITHUB_PRS_PERF=1` prints how long each frame and network reply takes.
 - `GITHUB_PRS_SCREENSHOT=out.png` saves a picture of the window once data
-  loads, then quits. Combine with `GITHUB_PRS_TAB=files|commits|checks`,
+  loads, then quits. Combine with `GITHUB_PRS_TAB=files|commits|checks|new`,
+  `GITHUB_PRS_ONE_FILE=1`,
   `GITHUB_PRS_THEME=dark|light`, `GITHUB_PRS_ROW=<n>`, and
   `GITHUB_PRS_COLLAPSE=list,details,tree`, `GITHUB_PRS_SCROLL=<px>|bottom`,
   `GITHUB_PRS_GOTO=<link>`, `GITHUB_PRS_COMMIT=first|last|<sha>` (open that

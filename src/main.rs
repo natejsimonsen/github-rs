@@ -15,6 +15,7 @@ mod images;
 #[cfg(target_os = "macos")]
 mod macos;
 mod markdown;
+mod seen;
 mod settings;
 #[cfg(feature = "snapshot")]
 mod snapshot;

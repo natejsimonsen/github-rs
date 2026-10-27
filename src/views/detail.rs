@@ -6,7 +6,7 @@ use super::{
     primary_button, row_separator, status_icon,
 };
 use crate::app::{Action, App, CommitPage, Panel, Tab};
-use crate::github::{Check, Comment, CommitDetail, Event, EventCommit, PrDetail, PrSummary, Review, Reviewer, Thread};
+use crate::github::{Check, Comment, CommitDetail, Compare, Event, EventCommit, PrDetail, PrSummary, Review, Reviewer, Thread};
 use crate::icons::{self, Icon};
 use crate::theme::{self, Palette};
 use crate::{diff, util};
@@ -45,6 +45,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     // Same right edge as the scrolling content below (which leaves room
     // for its scrollbar).
     let full = ui.available_width();
+    // Looking at code counts as a visit, saved as seen once you move on.
+    if app.commit.is_some() || matches!(app.tab, Tab::Files | Tab::New) {
+        app.note_visit();
+    }
     if let Some(page) = app.commit.clone() {
         // A commit's page: the PR's slim header and tabs stay, like GitHub's
         // /pull/N/commits/sha, and the commit takes the rest.
@@ -95,6 +99,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         app.details_folded = false;
     }
     match app.tab {
+        Tab::New => new_tab(app, ui, p, &d),
         Tab::Files => match files {
             Some(f) => {
                 let src = diff::Source { repo: &d.repository.name_with_owner, head: &d.head_ref_oid, commit: false };
@@ -144,7 +149,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     Tab::Conversation => ui.vertical(|ui| timeline(app, ui, p, &d)).inner,
                     Tab::Commits => commits(app, ui, p, &d),
                     Tab::Checks => checks(app, ui, p, &d.checks),
-                    Tab::Files => {}
+                    Tab::Files | Tab::New => {}
                 }
                 ui.add_space(40.0);
                 if to_bottom {
@@ -324,7 +329,7 @@ fn full_header(app: &mut App, ui: &mut Ui, p: &Palette, sel: &PrSummary, d: Opti
 
 /// Conversation / Commits / Checks / Files, with the diffstat on the right.
 fn tab_row(app: &mut App, ui: &mut Ui, p: &Palette, d: Option<&PrDetail>, file_count: Option<usize>) {
-    let tabs = [
+    let mut tabs = vec![
         (
             Tab::Conversation,
             Icon::Comment,
@@ -335,6 +340,12 @@ fn tab_row(app: &mut App, ui: &mut Ui, p: &Palette, d: Option<&PrDetail>, file_c
         (Tab::Checks, Icon::Checklist, "Checks", d.map(|d| d.checks.len() as u64)),
         (Tab::Files, Icon::FileDiff, "Files changed", file_count.map(|n| n as u64).or(d.map(|d| d.changed_files))),
     ];
+    // "New": what changed since you last looked. Only there when something did.
+    let news = d.and_then(|d| app.news(d)).filter(|n| !n.is_empty());
+    if news.is_some() || app.tab == Tab::New {
+        let count = news.as_ref().map(|n| n.commits.filter(|c| *c > 0).unwrap_or(n.said.len()) as u64).filter(|c| *c > 0);
+        tabs.push((Tab::New, Icon::Eye, "New", count));
+    }
     let active = if app.commit.is_some() { Tab::Commits } else { app.tab };
     let row = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -373,6 +384,7 @@ fn tab_row(app: &mut App, ui: &mut Ui, p: &Palette, d: Option<&PrDetail>, file_c
                         if active == tab && !ui.clip_rect().contains_rect(resp.rect) {
                             ui.scroll_to_rect(resp.rect.expand2(vec2(40.0, 0.0)), None);
                         }
+                        let resp = if tab == Tab::New { resp.tip("What changed since you last looked (⌘5)") } else { resp };
                         if resp.clicked() {
                             app.actions.push(Action::Tab(tab));
                         }
@@ -1076,6 +1088,13 @@ fn event_row(app: &mut App, ui: &mut Ui, p: &Palette, events: &[&Event], repo: &
                 sha_link(app, ui, p, repo, c);
             }
             muted(ui, &ago);
+            if let (Some(a), Some(b)) = (&e.before_commit, &e.after_commit)
+                && !a.oid.is_empty()
+                && !b.oid.is_empty()
+                && link(ui, "Compare", theme::TEXT_BODY, p).tip("What changed between the two versions").clicked()
+            {
+                app.actions.push(Action::OpenRange(repo.to_string(), a.oid.clone(), b.oid.clone()));
+            }
         }),
         "ReadyForReviewEvent" => event_line(ui, p, Icon::Eye, None, who, |ui| muted(ui, &format!("marked this pull request as ready for review {ago}"))),
         "ConvertToDraftEvent" => event_line(ui, p, Icon::PrDraft, None, who, |ui| muted(ui, &format!("marked this pull request as draft {ago}"))),
@@ -2360,6 +2379,32 @@ fn commits(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
         ui.add_space(8.0);
     }
     let repo = &d.repository.name_with_owner;
+    // Review one commit at a time: how far along you are, and the next one.
+    let reviewed = nodes.iter().filter(|n| app.seen.reviewed.contains(&n.commit.oid)).count();
+    ui.horizontal(|ui| {
+        ui.set_min_height(theme::CONTROL_H);
+        ui.spacing_mut().item_spacing.x = 6.0;
+        let next = nodes.iter().find(|n| !app.seen.reviewed.contains(&n.commit.oid));
+        let label = if reviewed == 0 { "Review commit by commit" } else { "Review next commit" };
+        if let Some(n) = next
+            && ui.add(button(label, p)).tip("Open the first commit you haven't reviewed. On its page, v marks it reviewed and moves on.").clicked()
+        {
+            app.actions.push(Action::OpenCommit(repo.clone(), n.commit.oid.clone()));
+        }
+        let text = if next.is_none() { "All commits reviewed".to_string() } else { format!("{reviewed} of {} reviewed", nodes.len()) };
+        ui.label(RichText::new(text).size(theme::TEXT_DENSE).color(if next.is_none() { p.open } else { p.fg_muted }));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let hint = match &app.range_start {
+                Some(_) => "Now shift-click the last commit of the range. Esc cancels.",
+                None => "Shift-click two commits to see the changes between them.",
+            };
+            ui.label(RichText::new(hint).size(theme::TEXT_SMALL).color(p.fg_muted));
+        });
+    });
+    if app.range_start.is_some() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        app.range_start = None;
+    }
+    ui.add_space(12.0);
     // The head commit's status comes from the checks list, where policy-bot
     // is ignored; GitHub's own rollup would count it. Its tooltip says which
     // checks failed, so a red X beside "Ready to merge" explains itself.
@@ -2392,7 +2437,7 @@ fn commits(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail) {
                         let rollup = || c.status_check_rollup.as_ref().map(|r| (r.state.as_str(), rollup_tip(&r.state).to_string()));
                         let is_head = i + k + 1 == nodes.len();
                         let state = if is_head { head_state.clone().or_else(rollup) } else { rollup() };
-                        commit_row(app, ui, p, repo, c, state);
+                        commit_row(app, ui, p, d, c, state);
                         if k + 1 < j - i {
                             row_separator(ui);
                         }
@@ -2442,11 +2487,45 @@ fn message_expander(ui: &mut Ui, p: &Palette, body_id: egui::Id, body_open: bool
     }
 }
 
+/// Shift-click on a commit: the first pick starts a range, the second
+/// opens the changes from the first through the second.
+fn range_click(app: &mut App, d: &PrDetail, oid: &str) -> Option<Action> {
+    let Some(start) = app.range_start.take().filter(|s| s != oid) else {
+        app.range_start = Some(oid.to_string());
+        return None;
+    };
+    let nodes = &d.commits.nodes;
+    let at = |o: &str| nodes.iter().position(|n| n.commit.oid == o);
+    let (a, b) = (at(&start)?, at(oid)?);
+    let (first, last) = (a.min(b), a.max(b));
+    // From just before the first commit: its parent in the PR, or the base.
+    let base = if first > 0 { nodes[first - 1].commit.oid.clone() } else { d.base_ref_oid.clone() };
+    if base.is_empty() {
+        return None;
+    }
+    Some(Action::OpenRange(d.repository.name_with_owner.clone(), base, nodes[last].commit.oid.clone()))
+}
+
 /// `state` is the commit's check state and its tooltip.
-fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, repo: &str, c: &crate::github::Commit, state: Option<(&str, String)>) {
+fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, d: &PrDetail, c: &crate::github::Commit, state: Option<(&str, String)>) {
+    let repo = &d.repository.name_with_owner;
     let open = || Action::OpenCommit(repo.to_string(), c.oid.clone());
-    egui::Frame::new().inner_margin(Margin::symmetric(16, 10)).show(ui, |ui| {
+    let picked = app.range_start.as_deref() == Some(c.oid.as_str());
+    let reviewed = app.seen.reviewed.contains(&c.oid);
+    let frame = egui::Frame::new().inner_margin(Margin::symmetric(16, 10)).fill(if picked { p.accent_subtle } else { Color32::TRANSPARENT });
+    frame.show(ui, |ui| {
         ui.set_width(ui.available_width());
+        // Opening it, or with shift held, picking it for a range.
+        let shift = ui.input(|i| i.modifiers.shift);
+        let click = |app: &mut App| {
+            if shift {
+                if let Some(a) = range_click(app, d, &c.oid) {
+                    app.actions.push(a);
+                }
+            } else {
+                app.actions.push(open());
+            }
+        };
         let verified = c.signature.as_ref().is_some_and(|s| s.is_valid);
         // The right-hand group, measured: SHA button, copy, browse, and the
         // Verified pill. The headline gets everything else.
@@ -2455,7 +2534,7 @@ fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, repo: &str, c: &crate::gi
         let sha_w = sha.size().x + 20.0;
         let verified_w =
             if verified { ui.painter().layout_no_wrap("Verified".into(), theme::bold(theme::TEXT_SMALL), p.open).size().x + 14.0 + gap * 2.0 } else { 0.0 };
-        let right_w = sha_w + gap + theme::CONTROL_H + gap + theme::CONTROL_H + verified_w;
+        let right_w = sha_w + gap + theme::CONTROL_H + gap + theme::CONTROL_H + verified_w + theme::CONTROL_H + gap;
         let w = (ui.available_width() - right_w - 16.0).max(120.0);
         let body_id = egui::Id::new(("commit-body", &c.oid));
         let body_open = ui.ctx().data(|d| d.get_temp::<bool>(body_id)).unwrap_or(false);
@@ -2481,7 +2560,7 @@ fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, repo: &str, c: &crate::gi
                         }
                         let resp = if cut { resp.tip_below(&c.message_headline) } else { resp };
                         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-                            app.actions.push(open());
+                            click(app);
                         }
                         if has_body {
                             message_expander(ui, p, body_id, body_open);
@@ -2526,7 +2605,16 @@ fn commit_row(app: &mut App, ui: &mut Ui, p: &Palette, repo: &str, c: &crate::gi
         ui.painter().galley(r.center() - sha.size() / 2.0, sha, p.fg_muted);
         super::tip(&resp, "View commit details");
         if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
-            app.actions.push(open());
+            click(app);
+        }
+        // Your own tick, kept on this computer.
+        let (r, resp) = ui.allocate_exact_size(vec2(theme::CONTROL_H, theme::CONTROL_H), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, reviewed, "Reviewed"));
+        let b = Rect::from_center_size(r.center(), vec2(theme::CHECK_BOX, theme::CHECK_BOX));
+        super::paint_checkbox(ui.painter(), b, reviewed, resp.hovered(), p);
+        let tip = if reviewed { "Reviewed. Click to untick." } else { "Mark as reviewed (only on this computer)" };
+        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).tip(tip).clicked() {
+            app.actions.push(Action::SetReviewed(c.oid.clone(), !reviewed));
         }
         if verified {
             ui.add_space(gap);
@@ -2794,6 +2882,9 @@ fn check_row(app: &mut App, ui: &mut Ui, p: &Palette, c: &Check, cols: &CheckCol
 /// A commit's page: a way back, its message and author in a box, then its
 /// diff with the file tree.
 fn commit_page(app: &mut App, ui: &mut Ui, p: &Palette, page: &CommitPage, d: Option<&PrDetail>) {
+    if let Some(base) = &page.base {
+        return range_page(app, ui, p, page, base);
+    }
     let key = page.key();
     let entry = app.commits.get(&key);
     let data = entry.and_then(|c| c.data.clone());
@@ -2850,7 +2941,7 @@ fn commit_nav(app: &mut App, ui: &mut Ui, p: &Palette, page: &CommitPage, d: Opt
         let at = nodes.iter().position(|n| n.commit.oid == page.oid);
         if let Some(h) = headline {
             // Cut to leave room for Prev / Next on the right.
-            let room = ui.available_width() - if at.is_some() { 260.0 } else { 0.0 };
+            let room = ui.available_width() - if at.is_some() { 400.0 } else { 0.0 };
             let mut job = egui::text::LayoutJob::default();
             super::append_title(&mut job, h, theme::TEXT_DENSE, true, 0.0, p);
             job.wrap = egui::text::TextWrapping::truncate_at_width((room - 16.0).max(60.0));
@@ -2868,14 +2959,23 @@ fn commit_nav(app: &mut App, ui: &mut Ui, p: &Palette, page: &CommitPage, d: Opt
                 ui.spacing_mut().item_spacing.x = 4.0;
                 let next = nodes.get(i + 1).map(|n| n.commit.oid.clone());
                 let prev = i.checked_sub(1).map(|j| nodes[j].commit.oid.clone());
-                if ui.add_enabled(next.is_some(), button("Next ›", p)).clicked() {
+                if ui.add_enabled(next.is_some(), button("Next ›", p)).tip("Next commit (])").clicked() {
                     app.actions.push(Action::OpenCommit(page.repo.clone(), next.unwrap_or_default()));
                 }
-                if ui.add_enabled(prev.is_some(), button("‹ Prev", p)).clicked() {
+                if ui.add_enabled(prev.is_some(), button("‹ Prev", p)).tip("Previous commit ([)").clicked() {
                     app.actions.push(Action::OpenCommit(page.repo.clone(), prev.unwrap_or_default()));
                 }
                 ui.add_space(8.0);
                 ui.label(RichText::new(format!("Commit {} of {}", i + 1, nodes.len())).size(theme::TEXT_DENSE).color(p.fg_muted));
+                ui.add_space(8.0);
+                let reviewed = app.seen.reviewed.contains(&page.oid);
+                if reviewed {
+                    if ui.add(button("✓ Reviewed", p)).tip("Untick reviewed").clicked() {
+                        app.actions.push(Action::SetReviewed(page.oid.clone(), false));
+                    }
+                } else if ui.add(super::primary_button("Reviewed, next", p)).tip("Mark reviewed and open the next commit you haven't reviewed (v)").clicked() {
+                    app.actions.push(Action::ReviewedNext);
+                }
             });
         }
     });
@@ -2980,6 +3080,254 @@ fn commit_box(app: &mut App, ui: &mut Ui, p: &Palette, c: &CommitDetail, page: &
             });
         });
     });
+}
+
+/// The changes across several commits, or between the two sides of a
+/// force push.
+fn range_page(app: &mut App, ui: &mut Ui, p: &Palette, page: &CommitPage, base: &str) {
+    let key = page.key();
+    let entry = app.compares.get(&key);
+    let data = entry.and_then(|c| c.data.clone());
+    let error = entry.and_then(|c| c.error.clone());
+    let full = ui.available_width();
+    ui.scope(|ui| {
+        ui.set_max_width(full - 14.0);
+        ui.horizontal(|ui| {
+            ui.set_min_height(theme::CONTROL_H);
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if link_styled(ui, "← Back to pull request", theme::body(theme::TEXT_DENSE), p.accent).tip("Back (Esc)").clicked() {
+                app.actions.push(Action::CloseCommit);
+            }
+            ui.label(RichText::new("·").size(theme::TEXT_DENSE).color(p.fg_muted));
+            ui.label(RichText::new("Changes from").size(theme::TEXT_DENSE).color(p.fg_muted));
+            sha_text(ui, p, short_sha(base), base);
+            ui.label(RichText::new("to").size(theme::TEXT_DENSE).color(p.fg_muted));
+            sha_text(ui, p, short_sha(&page.oid), &page.oid);
+        });
+        ui.add_space(8.0);
+        match (&data, &error) {
+            (Some(c), _) => compare_box(app, ui, p, &page.repo, c),
+            (None, Some(e)) => {
+                if super::error_banner(ui, p, "Couldn't compare these commits.", e) {
+                    app.retry_compare(&key);
+                    app.ensure_compare(&page.repo, base, &page.oid);
+                }
+            }
+            (None, None) => {
+                ui.add_space(40.0);
+                ui.vertical_centered(|ui| ui.add(egui::Spinner::new().size(24.0).color(p.fg_muted)));
+            }
+        }
+    });
+    if let Some(c) = data {
+        ui.add_space(12.0);
+        let src = diff::Source { repo: &page.repo, head: &page.oid, commit: true };
+        diff::show(app, ui, &key, c.files.clone(), src);
+    }
+}
+
+fn short_sha(sha: &str) -> &str {
+    &sha[..sha.len().min(7)]
+}
+
+/// Rows past this many collapse into "and N more", so the diff keeps the screen.
+const NEWS_ROWS: usize = 6;
+
+/// The commits in a comparison, and a note when history was rewritten.
+fn compare_box(app: &mut App, ui: &mut Ui, p: &Palette, repo: &str, c: &Compare) {
+    plain_box(ui, |ui| {
+        if c.status == "diverged" {
+            egui::Frame::new().inner_margin(Margin::symmetric(16, 10)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.label(
+                    RichText::new("History was rewritten in between (a rebase or force push). Only files this pull request touches are shown, but they can include changes from the base branch.")
+                        .size(theme::TEXT_DENSE)
+                        .color(p.fg_muted),
+                );
+            });
+            row_separator(ui);
+        }
+        let n = c.commits.len();
+        egui::Frame::new().inner_margin(Margin::symmetric(16, 10)).show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(format!("{n} commit{}", if n == 1 { "" } else { "s" })).font(theme::bold(theme::TEXT_DENSE)).color(p.fg));
+            ui.add_space(4.0);
+            for cc in c.commits.iter().rev().take(NEWS_ROWS) {
+                let author = cc.author.as_ref().map(|a| a.login.clone()).or_else(|| cc.commit.author.as_ref().and_then(|g| g.name.clone())).unwrap_or_default();
+                let when = cc.commit.author.as_ref().and_then(|g| g.date.as_deref()).unwrap_or("");
+                commit_line(app, ui, p, repo, &cc.sha, cc.headline(), &author, when);
+            }
+            if n > NEWS_ROWS {
+                ui.label(RichText::new(format!("and {} older", n - NEWS_ROWS)).size(theme::TEXT_SMALL).color(p.fg_muted));
+            }
+        });
+    });
+}
+
+/// One compact commit line: SHA, headline (opens the commit), who and when.
+#[allow(clippy::too_many_arguments)]
+fn commit_line(app: &mut App, ui: &mut Ui, p: &Palette, repo: &str, sha: &str, headline: &str, author: &str, when: &str) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        ui.spacing_mut().interact_size.y = 22.0;
+        if sha_text(ui, p, short_sha(sha), sha).clicked() {
+            app.actions.push(Action::OpenCommit(repo.to_string(), sha.to_string()));
+        }
+        let meta = format!("{author} · {}", util::ago(when));
+        let meta_w = ui.painter().layout_no_wrap(meta.clone(), theme::body(theme::TEXT_SMALL), p.fg_muted).size().x;
+        let mut job = egui::text::LayoutJob::default();
+        super::append_title(&mut job, headline, theme::TEXT_DENSE, true, 0.0, p);
+        let (g, cut) = super::cut_job(ui.painter(), job, (ui.available_width() - meta_w - 12.0).max(60.0));
+        let (r, resp) = ui.allocate_exact_size(g.size(), Sense::click());
+        ui.painter().galley(r.min, g, if resp.hovered() { p.accent } else { p.fg });
+        let resp = if cut { resp.tip(headline) } else { resp };
+        if resp.on_hover_cursor(egui::CursorIcon::PointingHand).clicked() {
+            app.actions.push(Action::OpenCommit(repo.to_string(), sha.to_string()));
+        }
+        ui.label(RichText::new(meta).size(theme::TEXT_SMALL).color(p.fg_muted));
+    });
+}
+
+/// What changed since you last looked: new commits and comments, then
+/// one diff from where you left off to now.
+fn new_tab(app: &mut App, ui: &mut Ui, p: &Palette, d: &Arc<PrDetail>) {
+    let repo = d.repository.name_with_owner.clone();
+    let full = ui.available_width();
+    let Some(news) = app.news(d) else {
+        app.new_target = None;
+        ui.add_space(40.0);
+        ui.vertical_centered(|ui| {
+            ui.label(RichText::new("Nothing to compare yet").font(theme::bold(theme::TEXT_HEADING)));
+            ui.label(RichText::new("Once you've looked at this PR's code, what changes after that shows up here.").color(p.fg_muted).size(theme::TEXT_DENSE));
+        });
+        return;
+    };
+    ui.scope(|ui| {
+        ui.set_max_width(full - 14.0);
+        plain_box(ui, |ui| {
+            egui::Frame::new().inner_margin(Margin::symmetric(16, 10)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.label(RichText::new("Since you last looked").font(theme::bold(theme::TEXT_BODY)).color(p.fg));
+                    let when = if news.anchor.from_review { "your last review" } else { "your last visit" };
+                    ui.label(RichText::new(format!("· {when}, {}, at", util::ago(&news.anchor.at))).size(theme::TEXT_DENSE).color(p.fg_muted));
+                    sha_text(ui, p, short_sha(&news.anchor.head), &news.anchor.head);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.add(button("Mark as seen", p)).tip("Start New over from here").clicked() {
+                            app.actions.push(Action::MarkSeen);
+                        }
+                    });
+                });
+            });
+            row_separator(ui);
+            egui::Frame::new().inner_margin(Margin::symmetric(16, 10)).show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let nodes = &d.commits.nodes;
+                match news.commits {
+                    _ if !news.moved => {
+                        ui.label(RichText::new("No new commits.").size(theme::TEXT_DENSE).color(p.fg_muted));
+                    }
+                    Some(n) => {
+                        ui.label(RichText::new(format!("{n} new commit{}", if n == 1 { "" } else { "s" })).font(theme::bold(theme::TEXT_DENSE)).color(p.fg));
+                        ui.add_space(4.0);
+                        for c in nodes.iter().rev().take(n.min(NEWS_ROWS)) {
+                            let c = &c.commit;
+                            let author = c.author.as_ref().and_then(|a| a.user.as_ref().map(|u| u.login.clone()).or(a.name.clone())).unwrap_or_default();
+                            commit_line(app, ui, p, &repo, &c.oid, &c.message_headline, &author, &c.committed_date);
+                        }
+                        if n > NEWS_ROWS {
+                            ui.label(RichText::new(format!("and {} older", n - NEWS_ROWS)).size(theme::TEXT_SMALL).color(p.fg_muted));
+                        }
+                    }
+                    None => {
+                        ui.label(
+                            RichText::new("The branch was force-pushed since, so the diff below compares the old head with the new one.")
+                                .size(theme::TEXT_DENSE)
+                                .color(p.fg_muted),
+                        );
+                    }
+                }
+            });
+            if !news.said.is_empty() {
+                row_separator(ui);
+                egui::Frame::new().inner_margin(Margin::symmetric(16, 10)).show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let n = news.said.len();
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("{n} new comment{}", if n == 1 { "" } else { "s" })).font(theme::bold(theme::TEXT_DENSE)).color(p.fg));
+                        if link(ui, "Open conversation", theme::TEXT_DENSE, p).clicked() {
+                            app.actions.push(Action::Tab(Tab::Conversation));
+                        }
+                    });
+                    ui.add_space(4.0);
+                    for s in news.said.iter().rev().take(NEWS_ROWS) {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            super::avatar_of(ui, s.who, s.avatar, 18.0);
+                            ui.label(RichText::new(s.who).font(theme::bold(theme::TEXT_SMALL)).color(p.fg));
+                            let what = if s.what.contains('/') || s.what.contains('.') { format!("on {}", s.what) } else { s.what.clone() };
+                            let meta = format!("{what} · {}", util::ago(s.at));
+                            ui.label(RichText::new(&meta).size(theme::TEXT_SMALL).color(p.fg_muted));
+                            // The first real line; bots open with hidden <!-- markers -->.
+                            let first = s.body.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("<!--")).unwrap_or("");
+                            let job = egui::text::LayoutJob::single_section(
+                                first.to_string(),
+                                egui::TextFormat { font_id: theme::body(theme::TEXT_SMALL), color: p.fg_muted, ..Default::default() },
+                            );
+                            let (g, cut) = super::cut_job(ui.painter(), job, (ui.available_width() - 4.0).max(40.0));
+                            let (r, resp) = ui.allocate_exact_size(g.size(), Sense::hover());
+                            ui.painter().galley(r.min, g, p.fg_muted);
+                            if cut {
+                                resp.tip(first);
+                            }
+                        });
+                    }
+                    if n > NEWS_ROWS {
+                        ui.label(RichText::new(format!("and {} older", n - NEWS_ROWS)).size(theme::TEXT_SMALL).color(p.fg_muted));
+                    }
+                });
+            }
+        });
+    });
+    if !news.moved {
+        app.new_target = None;
+        return;
+    }
+    let (base, head) = (news.anchor.head.clone(), d.head_ref_oid.clone());
+    let key = app.ensure_compare(&repo, &base, &head);
+    app.new_target = Some((key.clone(), repo.clone(), head.clone()));
+    ui.add_space(12.0);
+    let entry = app.compares.get(&key);
+    match (entry.and_then(|c| c.data.clone()), entry.and_then(|c| c.error.clone())) {
+        (Some(c), _) => {
+            if c.status == "diverged" {
+                ui.label(
+                    RichText::new(
+                        "History was rewritten in between, so only files this pull request touches are shown. They can include changes from the base branch.",
+                    )
+                    .size(theme::TEXT_SMALL)
+                    .color(p.fg_muted),
+                );
+                ui.add_space(8.0);
+            }
+            let src = diff::Source { repo: &repo, head: &head, commit: true };
+            diff::show(app, ui, &key, c.files.clone(), src);
+        }
+        (None, Some(e)) => {
+            ui.scope(|ui| {
+                ui.set_max_width(full - 14.0);
+                // Usually the old commit is gone after a force push.
+                if super::error_banner(ui, p, "Couldn't compare with the commit you last saw. It may be gone after a force push.", &e) {
+                    app.retry_compare(&key);
+                }
+            });
+        }
+        (None, None) => {
+            ui.add_space(40.0);
+            ui.vertical_centered(|ui| ui.add(egui::Spinner::new().size(24.0).color(p.fg_muted)));
+        }
+    }
 }
 
 #[cfg(test)]
