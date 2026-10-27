@@ -260,6 +260,9 @@ pub struct Review {
     pub state: String,
     pub submitted_at: Option<String>,
     pub url: String,
+    /// The head commit when the review was submitted.
+    #[serde(default)]
+    pub commit: Option<EventCommit>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -406,6 +409,8 @@ pub struct PrDetail {
     #[serde(default)]
     pub head_ref_oid: String,
     #[serde(default)]
+    pub base_ref_oid: String,
+    #[serde(default)]
     pub viewer_can_enable_auto_merge: bool,
     #[serde(default)]
     pub viewer_can_disable_auto_merge: bool,
@@ -454,6 +459,9 @@ pub struct FileDiff {
     /// You ticked "Viewed" on GitHub for this file.
     #[serde(default)]
     pub viewed: bool,
+    /// You ticked "Viewed", but the file changed since, so GitHub unticked it.
+    #[serde(default)]
+    pub stale_view: bool,
 }
 
 /// One commit with its changed files, from the REST API.
@@ -511,6 +519,31 @@ pub struct Verification {
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct Parent {
     pub sha: String,
+}
+
+/// What changed between two commits, from the REST compare API.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Compare {
+    /// "ahead" after a plain push, "diverged" after a force push or rebase.
+    pub status: String,
+    #[serde(default)]
+    pub commits: Vec<CompareCommit>,
+    #[serde(default)]
+    pub files: Arc<Vec<FileDiff>>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CompareCommit {
+    pub sha: String,
+    #[serde(default)]
+    pub commit: CommitMeta,
+    pub author: Option<Actor>,
+}
+
+impl CompareCommit {
+    pub fn headline(&self) -> &str {
+        self.commit.message.lines().next().unwrap_or("").trim()
+    }
 }
 
 /// A sidebar section: a name, an icon, and the search that fills it.
@@ -808,7 +841,9 @@ impl Client {
         // Missing viewed state shouldn't hide the diff.
         if let Ok(Ok(viewed)) = viewed {
             for f in &mut files {
-                f.viewed = viewed.contains(&f.filename);
+                let state = viewed.get(&f.filename).copied();
+                f.viewed = state == Some(ViewedState::Viewed);
+                f.stale_view = state == Some(ViewedState::Stale);
             }
         }
         Ok(files)
@@ -833,21 +868,34 @@ impl Client {
         Ok(out.expect("one page at least"))
     }
 
-    fn viewed_files(&self, repo: &str, number: u64) -> Result<std::collections::HashSet<String>> {
+    /// What changed from `base` to `head`. Three dots: from where the two
+    /// histories split, so after a rebase this includes the base branch's changes.
+    pub fn compare(&self, repo: &str, base: &str, head: &str) -> Result<Compare> {
+        let body = self.rest_get(&format!("/repos/{repo}/compare/{base}...{head}?per_page=250"))?;
+        let mut c: Compare = serde_json::from_str(&body).map_err(|e| Error::Other(format!("Unexpected response: {e}")))?;
+        crate::diff::sort_like_tree(Arc::make_mut(&mut c.files).as_mut_slice());
+        Ok(c)
+    }
+
+    fn viewed_files(&self, repo: &str, number: u64) -> Result<std::collections::HashMap<String, ViewedState>> {
         const Q: &str = "query($owner: String!, $name: String!, $n: Int!, $after: String) {
           repository(owner: $owner, name: $name) { pullRequest(number: $n) {
             files(first: 100, after: $after) { pageInfo { hasNextPage endCursor } nodes { path viewerViewedState } } } } }";
         let (owner, name) = repo.split_once('/').unwrap_or((repo, ""));
-        let mut out = std::collections::HashSet::new();
+        let mut out = std::collections::HashMap::new();
         let mut after = Value::Null;
         for _ in 0..30 {
             let data = self.graphql(Q, json!({ "owner": owner, "name": name, "n": number, "after": after }))?;
             let files = &data["repository"]["pullRequest"]["files"];
             for n in files["nodes"].as_array().into_iter().flatten() {
-                if n["viewerViewedState"] == "VIEWED"
-                    && let Some(p) = n["path"].as_str()
-                {
-                    out.insert(p.to_string());
+                let state = match n["viewerViewedState"].as_str() {
+                    Some("VIEWED") => ViewedState::Viewed,
+                    // Viewed once, then the file changed.
+                    Some("DISMISSED") => ViewedState::Stale,
+                    _ => continue,
+                };
+                if let Some(p) = n["path"].as_str() {
+                    out.insert(p.to_string(), state);
                 }
             }
             if files["pageInfo"]["hasNextPage"] != true {
@@ -970,6 +1018,12 @@ impl Client {
     }
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum ViewedState {
+    Viewed,
+    Stale,
+}
+
 fn parse_search(v: &Value) -> (u64, Vec<PrSummary>) {
     let count = v["issueCount"].as_u64().unwrap_or(0);
     let rows = v["nodes"]
@@ -1071,7 +1125,7 @@ fn parse_check(n: &Value, s: impl Fn(&Value) -> Option<String>) -> Check {
 /// answer "is this check required" for.
 const DETAIL_FIELDS: &str = r#"
   id number title url body state isDraft createdAt mergedAt
-  additions deletions changedFiles baseRefName headRefName mergeable reviewDecision headRefOid
+  additions deletions changedFiles baseRefName headRefName mergeable reviewDecision headRefOid baseRefOid
   mergeStateStatus autoMergeRequest { mergeMethod enabledBy { login avatarUrl(size: 80) } }
   viewerCanEnableAutoMerge viewerCanDisableAutoMerge
   latestOpinionatedReviews(first: 30) { nodes { state author { login } } }
@@ -1088,7 +1142,7 @@ const DETAIL_FIELDS: &str = r#"
     ... on User { login avatarUrl(size: 80) } ... on Team { name } } } }
   comments(first: 100) { nodes { author { login avatarUrl(size: 80) } body createdAt url } }
   reviews(first: 100) { nodes {
-    id author { login avatarUrl(size: 80) } body state submittedAt url
+    id author { login avatarUrl(size: 80) } body state submittedAt url commit { oid abbreviatedOid }
   } }
   commits(last: 100) { totalCount nodes { commit {
     oid abbreviatedOid messageHeadline messageBody committedDate

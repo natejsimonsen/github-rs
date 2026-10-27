@@ -91,6 +91,13 @@ pub struct Layout {
     changes: Vec<Option<std::ops::Range<usize>>>,
 }
 
+impl Layout {
+    /// Where file `i`'s header starts.
+    pub fn file_top(&self, i: usize) -> Option<f32> {
+        self.file_tops.get(i).copied()
+    }
+}
+
 /// Pairs each block of deleted lines with the added lines right after it,
 /// line by line, and marks what changed between each pair: everything but
 /// the shared start and end, widened to whole words.
@@ -392,18 +399,42 @@ pub struct Source<'a> {
 
 pub fn show(app: &mut App, ui: &mut Ui, pr_id: &str, files: Arc<Vec<FileDiff>>, src: Source<'_>) {
     let p = theme::palette(ui.ctx());
-    let layout = match app.diff_layouts.get(pr_id) {
+    // One file at a time: the layout holds just that file, under its own key.
+    let focus = (app.panels.one_file && !files.is_empty()).then(|| {
+        app.file_focus.get(pr_id).and_then(|path| files.iter().position(|f| &f.filename == path)).unwrap_or_else(|| crate::app::first_unviewed(&files))
+    });
+    let layout_key = match focus {
+        Some(i) => format!("{pr_id}\0{}", files[i].filename),
+        None => pr_id.to_string(),
+    };
+    let layout = match app.diff_layouts.get(&layout_key) {
         Some(l) => l.clone(),
         None => {
-            let l = Arc::new(build(files.clone(), |f| app.is_collapsed(pr_id, &f.filename), |f| app.expansion(pr_id, &f.filename)));
-            app.diff_layouts.insert(pr_id.to_string(), l.clone());
+            let l = match focus {
+                // Shown on its own, a file is always open.
+                Some(i) => build(Arc::new(vec![files[i].clone()]), |_| false, |f| app.expansion(pr_id, &f.filename)),
+                None => build(files.clone(), |f| app.is_collapsed(pr_id, &f.filename), |f| app.expansion(pr_id, &f.filename)),
+            };
+            let l = Arc::new(l);
+            app.diff_layouts.insert(layout_key.clone(), l.clone());
             l
         }
     };
 
     let jump_id = egui::Id::new(("diff-jump", pr_id));
     let current_id = egui::Id::new(("diff-current", pr_id));
+    // A different file on its own starts at its top.
+    let shown_id = egui::Id::new(("diff-shown", pr_id));
+    if ui.ctx().data(|d| d.get_temp::<String>(shown_id)).as_ref() != Some(&layout_key) {
+        ui.ctx().data_mut(|d| {
+            d.insert_temp(shown_id, layout_key.clone());
+            if focus.is_some() {
+                d.insert_temp(jump_id, 0.0f32);
+            }
+        });
+    }
     let mut toggle = false;
+    let mut picked: Option<usize> = None;
     // File tree on the left. Closed, it's gone entirely; the button to bring
     // it back sits next to the summary line.
     // Like GitHub, the tree folds away when the page is narrow.
@@ -426,15 +457,14 @@ pub fn show(app: &mut App, ui: &mut Ui, pr_id: &str, files: Arc<Vec<FileDiff>>, 
                 .show(ui, |ui| {
                     ui.set_width(300.0f32.min(width * 0.45));
                     ui.set_height(height - 24.0);
-                    tree_header(ui, p, &layout, &mut toggle);
-                    let current = ui.ctx().data(|d| d.get_temp::<usize>(current_id));
-                    file_tree(ui, p, &layout, jump_id, pr_id, current);
+                    tree_header(ui, p, files.len(), &mut toggle);
+                    let current = focus.or_else(|| ui.ctx().data(|d| d.get_temp::<usize>(current_id)));
+                    file_tree(ui, p, &files, &mut picked, pr_id, current);
                 });
         });
-        let picked = ui.ctx().data(|d| d.get_temp::<f32>(jump_id)).is_some();
         let clicked_outside = ui.input(|i| i.pointer.any_click() && i.pointer.interact_pos().is_some_and(|pos| !area.response.rect.contains(pos)));
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
-        if picked || clicked_outside || escape {
+        if picked.is_some() || clicked_outside || escape {
             app.tree_open_narrow = false;
         }
     } else if tree_open {
@@ -445,12 +475,19 @@ pub fn show(app: &mut App, ui: &mut Ui, pr_id: &str, files: Arc<Vec<FileDiff>>, 
             .show_separator_line(false)
             .frame(egui::Frame::new().inner_margin(egui::Margin { left: 0, right: 16, top: 0, bottom: 0 }))
             .show(ui, |ui| {
-                tree_header(ui, p, &layout, &mut toggle);
-                let current = ui.ctx().data(|d| d.get_temp::<usize>(current_id));
-                file_tree(ui, p, &layout, jump_id, pr_id, current);
+                tree_header(ui, p, files.len(), &mut toggle);
+                let current = focus.or_else(|| ui.ctx().data(|d| d.get_temp::<usize>(current_id)));
+                file_tree(ui, p, &files, &mut picked, pr_id, current);
             });
     }
-    ui.vertical(|ui| diff_rows(app, ui, p, &layout, jump_id, current_id, &src, &mut toggle));
+    if let Some(i) = picked {
+        if focus.is_some() {
+            app.actions.push(Action::FocusFile(files[i].filename.clone()));
+        } else {
+            ui.ctx().data_mut(|d| d.insert_temp(jump_id, layout.file_tops[i]));
+        }
+    }
+    ui.vertical(|ui| diff_rows(app, ui, p, &layout, &files, focus, jump_id, current_id, &src, &mut toggle));
     if toggle {
         app.actions.push(Action::TogglePanel(Panel::Tree));
     }
@@ -516,14 +553,14 @@ fn marks_changed_words() {
 }
 
 /// "Files 38" with the button that hides the tree.
-fn tree_header(ui: &mut Ui, p: &Palette, layout: &Layout, toggle: &mut bool) {
+fn tree_header(ui: &mut Ui, p: &Palette, count: usize, toggle: &mut bool) {
     ui.horizontal(|ui| {
         // Same height as the summary row beside it, so the filter and the
         // first file's box line up.
         ui.set_min_height(theme::CONTROL_H);
         *toggle |= crate::views::icon_button_tip_above(ui, Icon::SidebarLeftClose, "Hide file tree (⇧⌘B)", p).clicked();
         ui.label(egui::RichText::new("Files").font(theme::bold(theme::TEXT_BODY)).color(p.fg));
-        ui.label(egui::RichText::new(layout.files.len().to_string()).size(theme::TEXT_SMALL).color(p.fg_muted));
+        ui.label(egui::RichText::new(count.to_string()).size(theme::TEXT_SMALL).color(p.fg_muted));
     });
     ui.add_space(8.0);
 }
@@ -572,7 +609,8 @@ impl Dir {
     }
 }
 
-fn file_tree(ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: egui::Id, pr_id: &str, current: Option<usize>) {
+/// `picked` gets the index of a file clicked in the tree.
+fn file_tree(ui: &mut Ui, p: &Palette, files: &[FileDiff], picked: &mut Option<usize>, pr_id: &str, current: Option<usize>) {
     let filter_id = egui::Id::new(("tree-filter", pr_id));
     let mut filter = ui.ctx().data(|d| d.get_temp::<String>(filter_id)).unwrap_or_default();
     ui.set_max_width(ui.available_width());
@@ -583,10 +621,10 @@ fn file_tree(ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: egui::Id, pr_id
     }
     ui.ctx().data_mut(|d| d.insert_temp(filter_id, filter.clone()));
     ui.add_space(8.0);
-    let tree = Dir::of(&layout.files, &filter);
+    let tree = Dir::of(files, &filter);
     if !filter.trim().is_empty() && !(tree.dirs.is_empty() && tree.files.is_empty()) {
-        let n = layout.files.iter().filter(|f| f.filename.to_lowercase().contains(&filter.to_lowercase())).count();
-        ui.label(egui::RichText::new(format!("{n} of {} files", layout.files.len())).size(theme::TEXT_SMALL).color(p.fg_muted));
+        let n = files.iter().filter(|f| f.filename.to_lowercase().contains(&filter.to_lowercase())).count();
+        ui.label(egui::RichText::new(format!("{n} of {} files", files.len())).size(theme::TEXT_SMALL).color(p.fg_muted));
         ui.add_space(4.0);
     }
     egui::ScrollArea::vertical().id_salt("tree").auto_shrink([false, false]).show(ui, |ui| {
@@ -594,12 +632,22 @@ fn file_tree(ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: egui::Id, pr_id
         if tree.dirs.is_empty() && tree.files.is_empty() {
             ui.label(egui::RichText::new("No files match.").size(theme::TEXT_DENSE).color(p.fg_muted));
         }
-        tree_dir(ui, p, layout, &tree, 0, "", jump_id, pr_id, current);
+        tree_dir(ui, p, files, &tree, 0, "", picked, pr_id, current);
     });
 }
 
 #[allow(clippy::too_many_arguments)]
-fn tree_dir(ui: &mut Ui, p: &Palette, layout: &Layout, dir: &Dir, depth: usize, path: &str, jump_id: egui::Id, pr_id: &str, current: Option<usize>) {
+fn tree_dir(
+    ui: &mut Ui,
+    p: &Palette,
+    files: &[FileDiff],
+    dir: &Dir,
+    depth: usize,
+    path: &str,
+    picked: &mut Option<usize>,
+    pr_id: &str,
+    current: Option<usize>,
+) {
     let indent = depth as f32 * 16.0;
     for (name, sub) in &dir.dirs {
         let full = format!("{path}{name}/");
@@ -624,11 +672,11 @@ fn tree_dir(ui: &mut Ui, p: &Palette, layout: &Layout, dir: &Dir, depth: usize, 
             ui.ctx().data_mut(|d| d.insert_temp(open_id, !open));
         }
         if open {
-            tree_dir(ui, p, layout, sub, depth + 1, &full, jump_id, pr_id, current);
+            tree_dir(ui, p, files, sub, depth + 1, &full, picked, pr_id, current);
         }
     }
     for (name, i) in &dir.files {
-        let f = &layout.files[*i];
+        let f = &files[*i];
         let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::click());
         let is_current = current == Some(*i);
         if is_current {
@@ -648,14 +696,22 @@ fn tree_dir(ui: &mut Ui, p: &Palette, layout: &Layout, dir: &Dir, depth: usize, 
         let status = Rect::from_min_size(pos2(rect.right() - 22.0, rect.center().y - 8.0), vec2(16.0, 16.0));
         if f.viewed {
             icons::paint(ui.painter(), status, Icon::Check, p.fg_muted);
+        } else if f.stale_view {
+            // Viewed once, changed since: a dot that asks for another look.
+            ui.painter().circle_filled(status.center(), 4.5, p.attention);
         } else {
             icons::paint(ui.painter(), status, icon, color);
         }
         resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
-        let resp = if cut { resp.tip(&f.filename) } else { resp };
+        let resp = match (cut, f.stale_view && !f.viewed) {
+            (true, true) => resp.tip(format!("{}\nChanged since you viewed it", f.filename)),
+            (true, false) => resp.tip(&f.filename),
+            (false, true) => resp.tip("Changed since you viewed it"),
+            (false, false) => resp,
+        };
         let resp = resp.on_hover_cursor(egui::CursorIcon::PointingHand);
         if resp.clicked() {
-            ui.ctx().data_mut(|d| d.insert_temp(jump_id, layout.file_tops[*i]));
+            *picked = Some(*i);
         }
     }
 }
@@ -682,11 +738,24 @@ fn elided(painter: &egui::Painter, _p: &Palette, left_center: egui::Pos2, max_w:
     cut
 }
 
+/// `all` is every file in the diff; `focus`, the one shown on its own.
 #[allow(clippy::too_many_arguments)]
-fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: egui::Id, current_id: egui::Id, src: &Source<'_>, toggle: &mut bool) {
-    let files = &layout.files;
+fn diff_rows(
+    app: &mut App,
+    ui: &mut Ui,
+    p: &Palette,
+    layout: &Layout,
+    all: &[FileDiff],
+    focus: Option<usize>,
+    jump_id: egui::Id,
+    current_id: egui::Id,
+    src: &Source<'_>,
+    toggle: &mut bool,
+) {
+    let files = all;
     let (adds, dels) = files.iter().fold((0, 0), |(a, d), f| (a + f.additions, d + f.deletions));
     let viewed = files.iter().filter(|f| f.viewed).count();
+    let stale = files.iter().filter(|f| f.stale_view && !f.viewed).count();
     ui.horizontal(|ui| {
         ui.set_min_height(theme::CONTROL_H);
         // Whenever the tree isn't showing, its button is.
@@ -702,7 +771,7 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
             if dels == 1 { "" } else { "s" },
         );
         // The summary gives way ("…") before the viewed count does.
-        let room = (ui.available_width() - 210.0).max(60.0);
+        let room = (ui.available_width() - 210.0 - 120.0 - if stale > 0 { 90.0 } else { 0.0 }).max(60.0);
         let mut job = egui::text::LayoutJob::single_section(
             summary.clone(),
             egui::TextFormat { font_id: theme::body(theme::TEXT_DENSE), color: p.fg_muted, ..Default::default() },
@@ -713,19 +782,64 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
         ui.painter().galley(r.min, g, p.fg_muted);
         resp.tip(&summary);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if src.commit {
-                return;
-            }
+            // Clear of the diff's scrollbar, like the file boxes below.
             ui.add_space(14.0);
-            // GitHub's progress bar for files viewed.
-            let (bar, _) = ui.allocate_exact_size(vec2(60.0, 8.0), Sense::hover());
-            ui.painter().rect_filled(bar, 4.0, p.border_muted);
-            let frac = if files.is_empty() { 0.0 } else { viewed as f32 / files.len() as f32 };
-            ui.painter().rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * frac, bar.height())), 4.0, p.open);
-            ui.label(egui::RichText::new(format!("{viewed} / {} files viewed", files.len())).color(p.fg_muted).size(theme::TEXT_DENSE));
+            if !src.commit {
+                // GitHub's progress bar for files viewed.
+                let (bar, _) = ui.allocate_exact_size(vec2(60.0, 8.0), Sense::hover());
+                ui.painter().rect_filled(bar, 4.0, p.border_muted);
+                let frac = if files.is_empty() { 0.0 } else { viewed as f32 / files.len() as f32 };
+                ui.painter().rect_filled(Rect::from_min_size(bar.min, vec2(bar.width() * frac, bar.height())), 4.0, p.open);
+                ui.label(egui::RichText::new(format!("{viewed} / {} files viewed", files.len())).color(p.fg_muted).size(theme::TEXT_DENSE));
+                if stale > 0 {
+                    ui.label(egui::RichText::new(format!("{stale} changed ·")).color(p.attention).size(theme::TEXT_DENSE)).tip(format!(
+                        "{stale} file{} changed since you marked {} viewed",
+                        if stale == 1 { "" } else { "s" },
+                        if stale == 1 { "it" } else { "them" }
+                    ));
+                }
+                ui.add_space(8.0);
+            }
+            let (label, tip) = if focus.is_some() { ("All files", "Show every file") } else { ("One file", "Show one file at a time (n / p to move)") };
+            if ui.add(crate::views::button(label, p)).tip(tip).clicked() {
+                app.actions.push(Action::SetOneFile(focus.is_none()));
+            }
         });
     });
+    if let Some(at) = focus {
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.set_min_height(theme::CONTROL_H);
+            ui.spacing_mut().item_spacing.x = 4.0;
+            if ui.add_enabled(at > 0, crate::views::button("‹ Prev", p)).tip("Previous file (p)").clicked() {
+                app.actions.push(Action::StepFile(-1));
+            }
+            if ui.add_enabled(at + 1 < files.len(), crate::views::button("Next ›", p)).tip("Next file (n)").clicked() {
+                app.actions.push(Action::StepFile(1));
+            }
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new(format!("File {} of {}", at + 1, files.len())).color(p.fg_muted).size(theme::TEXT_DENSE));
+            if !src.commit {
+                let left = files.len() - viewed;
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.add_space(14.0);
+                    let next = crate::app::next_unviewed(files, at).is_some();
+                    if ui
+                        .add_enabled(next, crate::views::button("Next unviewed", p))
+                        .tip("Next file you haven't viewed (u). v marks this one viewed and moves on.")
+                        .clicked()
+                    {
+                        app.actions.push(Action::NextUnviewed);
+                    }
+                    if left == 0 {
+                        ui.label(egui::RichText::new("All files viewed").color(p.open).size(theme::TEXT_DENSE));
+                    }
+                });
+            }
+        });
+    }
     ui.add_space(8.0);
+    let files = &layout.files;
 
     let char_w = ui.fonts_mut(|f| f.glyph_width(&theme::mono(theme::TEXT_SMALL), 'M'));
     // Salted per PR or commit, so pages don't inherit each other's scroll.
@@ -754,7 +868,10 @@ fn diff_rows(app: &mut App, ui: &mut Ui, p: &Palette, layout: &Layout, jump_id: 
 
         // Which file is at the top, for the tree's highlight.
         let current = layout.file_tops.partition_point(|&t| t <= viewport.min.y + 1.0).saturating_sub(1);
-        ui.ctx().data_mut(|d| d.insert_temp(current_id, current));
+        // On its own, a file's index is 0 here; the app keeps the real one.
+        if focus.is_none() {
+            ui.ctx().data_mut(|d| d.insert_temp(current_id, current));
+        }
 
         // Sideways scrolling for the file under the pointer.
         let hover = ui.input(|i| i.pointer.hover_pos()).filter(|h| rect.contains(*h));
@@ -967,7 +1084,10 @@ fn file_header(app: &mut App, ui: &mut Ui, p: &Palette, f: &FileDiff, fi: usize,
     let painter = ui.painter();
     let resp = ui.interact(r, egui::Id::new(("file-header", fi)), Sense::click());
     let right = r.right() - 12.0;
-    let viewed_w = if src.commit { 0.0 } else { 82.0 + 8.0 };
+    let stale = f.stale_view && !f.viewed && !src.commit;
+    let stale_g = stale.then(|| painter.layout_no_wrap("Changed since viewed".into(), theme::bold(theme::TEXT_SMALL), p.attention));
+    let stale_w = stale_g.as_ref().map_or(0.0, |g| g.size().x + 14.0 + 8.0);
+    let viewed_w = if src.commit { 0.0 } else { 82.0 + 8.0 + stale_w };
     let viewed_rect = Rect::from_min_max(pos2(right - 82.0, r.center().y - 14.0), pos2(right, r.center().y + 14.0));
     let menu_rect = Rect::from_min_size(pos2(right - viewed_w - 28.0, r.center().y - 14.0), vec2(28.0, 28.0));
     // Registered after the header, so these win clicks on top of it.
@@ -1019,6 +1139,13 @@ fn file_header(app: &mut App, ui: &mut Ui, p: &Palette, f: &FileDiff, fi: usize,
     icons::paint(painter, menu_rect.shrink(6.0), Icon::Kebab, p.fg_muted);
     if !src.commit {
         viewed_box(painter, p, viewed_rect, f.viewed, viewed_resp.hovered());
+    }
+    if let Some(g) = stale_g {
+        // Viewed once, then the file changed, so GitHub unticked it.
+        let pill = Rect::from_min_size(pos2(viewed_rect.left() - stale_w, r.center().y - 10.0), vec2(stale_w - 8.0, 20.0));
+        painter.rect(pill, CornerRadius::same(255), egui::Color32::TRANSPARENT, Stroke::new(1.0, p.attention.gamma_multiply(0.6)), StrokeKind::Inside);
+        painter.galley(pos2(pill.left() + 7.0, pill.center().y - g.size().y / 2.0), g, p.attention);
+        crate::views::tip(&ui.interact(pill, egui::Id::new(("file-stale", fi)), Sense::hover()), "You marked this file viewed, and it changed since.");
     }
     if resp.hovered() || viewed_resp.hovered() || copy_resp.hovered() || menu_resp.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

@@ -144,7 +144,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             for (i, pr) in rows.iter().enumerate() {
                 let selected = app.selected.as_ref().is_some_and(|s| s.id == pr.id);
                 let detail = fresher_detail(app, pr);
-                let resp = row(ui, p, pr, detail.as_deref(), selected);
+                let news = detail.as_deref().and_then(|d| app.news(d)).and_then(|n| n.short());
+                let resp = row(ui, p, pr, detail.as_deref(), news.as_deref(), selected);
                 if scroll_to == Some(last) && i == last && data.as_ref().is_some_and(|d| d.next.is_some()) {
                     // Handled below, once the footer exists.
                 } else if scroll_to == Some(i) {
@@ -494,7 +495,8 @@ fn nb(s: &str) -> String {
 /// One PR, laid out like github.com/pulls: state icon, "owner/repo Title",
 /// then CI status and labels flowing after the title, a meta line below,
 /// and the author and comment count at top right.
-fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, selected: bool) -> egui::Response {
+/// `news` is what changed since you last looked, like "3 new commits".
+fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, news: Option<&str>, selected: bool) -> egui::Response {
     let width = ui.available_width();
     let left = 16.0 + 16.0 + 8.0;
     let comments = pr.comments.total_count;
@@ -631,6 +633,13 @@ fn row(ui: &mut Ui, p: &Palette, pr: &PrSummary, detail: Option<&PrDetail>, sele
             &format!(" ●\u{a0}{}", ms.short.replace(' ', "\u{a0}").replace('-', "\u{2011}")),
             0.0,
             egui::TextFormat { font_id: theme::bold(theme::TEXT_SMALL), color: ms.color, ..Default::default() },
+        );
+    }
+    if let Some(news) = news {
+        meta_job.append(
+            &format!(" •\u{a0}{}", news.replace(' ', "\u{a0}")),
+            0.0,
+            egui::TextFormat { font_id: theme::bold(theme::TEXT_SMALL), color: p.accent, ..Default::default() },
         );
     }
     let meta_g = ui.painter().layout_job(meta_job);
