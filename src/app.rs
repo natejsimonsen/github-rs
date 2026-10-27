@@ -279,7 +279,8 @@ pub enum Action {
     SetPreview(bool),
     /// ⌘K: open or close the "Go to pull request" box.
     ToggleGoTo,
-    /// Open a pull request link handed to the app by the OS.
+    /// Open a pull request link handed to the app by the OS (macOS only).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     OpenLink(String),
     /// Open the PR typed in that box.
     GoTo,
