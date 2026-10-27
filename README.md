@@ -179,6 +179,7 @@ To sign out, right-click your avatar (top right), or delete that file.
 | `⌘O` | Open PR on github.com |
 | `c` or `⇧⌘C` | Copy PR link (`c` works when you're not typing) |
 | `⌘W` or `Ctrl+W` | Close the window |
+| `⌘?` or `?` | Help: how the app works and every shortcut (also the `?` button, top right) |
 
 On Windows and Linux, use `Ctrl` instead of `⌘`. Double-click a PR to open it on github.com.
 

@@ -85,6 +85,9 @@ fn header(app: &mut App, ui: &mut Ui, p: &Palette) {
                 if icon_button(ui, Icon::Gear, "Settings", p).clicked() {
                     app.actions.push(Action::OpenSettings);
                 }
+                if icon_button(ui, Icon::Question, "Help and keyboard shortcuts (⌘?)", p).clicked() {
+                    app.actions.push(Action::ToggleHelp);
+                }
                 let loading = app.lists.values().any(|l| l.loading);
                 if loading {
                     // Same button frame, with a spinner in it.
@@ -207,11 +210,16 @@ pub fn modal_frame(p: &Palette) -> Frame {
 /// A Primer dialog near the top of the window, over a dimmed page. Build it
 /// from `modal_section`s split by `modal_divider`s.
 pub fn modal<R>(ctx: &egui::Context, id: &str, add: impl FnOnce(&mut Ui) -> R) -> egui::ModalResponse<R> {
+    modal_sized(ctx, id, MODAL_W, add)
+}
+
+/// `modal`, at a width other than the usual one.
+pub fn modal_sized<R>(ctx: &egui::Context, id: &str, width: f32, add: impl FnOnce(&mut Ui) -> R) -> egui::ModalResponse<R> {
     let p = theme::palette(ctx);
     let id = egui::Id::new(id);
     let area = egui::Modal::default_area(id).anchor(egui::Align2::CENTER_TOP, vec2(0.0, 96.0));
     egui::Modal::new(id).area(area).frame(modal_frame(p)).backdrop_color(p.backdrop).show(ctx, |ui| {
-        ui.set_width(MODAL_W);
+        ui.set_width(width);
         // Sections and dividers butt together; each section pads itself.
         ui.spacing_mut().item_spacing.y = 0.0;
         add(ui)
@@ -231,6 +239,76 @@ pub fn modal_section<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
         .inner
 }
 
+/// A dialog's title band: the title on the left, and on the right an X
+/// with `Esc`, its key, beside it. Every dialog uses it, so titles and the
+/// first divider sit at the same height. True when the X is clicked.
+pub fn modal_header(ui: &mut Ui, title: &str, p: &Palette) -> bool {
+    modal_section(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(title).font(theme::bold(theme::TEXT_TITLE)).color(p.fg));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let closed = icon_button_plain(ui, Icon::X, "Close", p).clicked();
+                let size = key_cap_size(ui.painter(), "Esc", p);
+                let (r, _) = ui.allocate_exact_size(vec2(size.x, theme::CONTROL_H), Sense::hover());
+                key_cap(ui.painter(), r.right_center(), "Esc", p);
+                closed
+            })
+            .inner
+        })
+        .inner
+    })
+}
+
+/// The scroll bar of a dialog body: always shown while there's more to
+/// scroll, and drawn in the body's right padding, clear of the content.
+const MODAL_BAR_W: f32 = 6.0;
+const MODAL_BAR_MARGIN: f32 = 4.0;
+
+/// A dialog's body that scrolls when the window is too short for it. Pads
+/// itself like `modal_section`; the header and footer stay put.
+pub fn modal_scroll<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    let p = theme::palette(ui.ctx());
+    let spacing = ui.ctx().global_style().spacing.item_spacing;
+    // Room for the dialog's top offset, a header, a footer and a margin below.
+    let max_h = (ui.ctx().content_rect().height() - 260.0).max(160.0);
+    Frame::new()
+        .inner_margin(Margin { left: MODAL_PAD as i8, right: 0, top: 12, bottom: 12 })
+        .show(ui, |ui| {
+            // A modal's space is last frame's size; with nothing below the
+            // body to push it, it would never grow taller. Claim the room.
+            ui.set_max_height(max_h);
+            let widgets = ui.visuals().widgets.clone();
+            let mut scroll = egui::style::ScrollStyle::thin();
+            scroll.bar_width = MODAL_BAR_W;
+            scroll.floating_width = MODAL_BAR_W;
+            // The body's right padding is the gutter; the bar takes no more.
+            scroll.floating_allocated_width = 0.0;
+            scroll.bar_outer_margin = MODAL_BAR_MARGIN;
+            // The handle is there at rest, with no track behind it.
+            scroll.dormant_background_opacity = 0.0;
+            scroll.active_background_opacity = 0.0;
+            scroll.interact_background_opacity = 0.0;
+            scroll.interact_handle_opacity = 1.0;
+            ui.spacing_mut().scroll = scroll;
+            let v = &mut ui.visuals_mut().widgets;
+            v.inactive.bg_fill = p.border_emphasis;
+            v.hovered.bg_fill = p.fg_muted;
+            v.active.bg_fill = p.fg_muted;
+            egui::ScrollArea::vertical()
+                .max_height(max_h)
+                .auto_shrink([false, true])
+                .content_margin(Margin { right: MODAL_PAD as i8, ..Margin::ZERO })
+                .show(ui, |ui| {
+                    ui.visuals_mut().widgets = widgets;
+                    ui.set_width(ui.available_width());
+                    ui.spacing_mut().item_spacing = spacing;
+                    add(ui)
+                })
+                .inner
+        })
+        .inner
+}
+
 /// A full-width rule between dialog sections.
 pub fn modal_divider(ui: &mut Ui, p: &Palette) {
     let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 1.0), Sense::hover());
@@ -244,24 +322,43 @@ fn goto_highlight(painter: &egui::Painter, r: Rect, p: &Palette) {
     painter.rect_filled(Rect::from_min_size(r.min + vec2(0.0, 5.0), vec2(2.0, r.height() - 10.0)), 1.0, p.accent_emphasis);
 }
 
-/// A small key cap, like `Esc` or `⌘K`, with its right edge at
-/// `right_center`. `"↵"` is drawn as an arrow, since system fonts lack the
-/// glyph. Returns where it was drawn.
+/// Width of the drawn ↵ arrow, and its gap from text before it.
+const ENTER_W: f32 = 8.0;
+const ENTER_GAP: f32 = 2.0;
+
+/// A key cap's text, with a trailing `↵` split off (it's drawn, not typed).
+fn key_cap_parts(painter: &egui::Painter, key: &str, p: &Palette) -> (std::sync::Arc<egui::Galley>, bool, f32) {
+    let (text, enter) = key.strip_suffix('↵').map_or((key, false), |t| (t, true));
+    let g = painter.layout_no_wrap(text.to_string(), theme::body(theme::TEXT_SMALL), p.fg_muted);
+    let inner = g.size().x + if enter { ENTER_W + if text.is_empty() { 0.0 } else { ENTER_GAP } } else { 0.0 };
+    (g, enter, inner)
+}
+
+/// The size `key_cap` draws `key` at.
+pub fn key_cap_size(painter: &egui::Painter, key: &str, p: &Palette) -> egui::Vec2 {
+    vec2((key_cap_parts(painter, key, p).2 + 10.0).max(22.0), 20.0)
+}
+
+/// A small key cap, like `Esc`, `⌘K` or `⌘↵`, with its right edge at
+/// `right_center`. A trailing `↵` is drawn as an arrow, since system fonts
+/// lack the glyph. Returns where it was drawn.
 pub fn key_cap(painter: &egui::Painter, right_center: egui::Pos2, key: &str, p: &Palette) -> Rect {
-    let enter = key == "↵";
-    let g = painter.layout_no_wrap(if enter { String::new() } else { key.to_string() }, theme::body(theme::TEXT_SMALL), p.fg_muted);
-    let size = vec2((g.size().x + 10.0).max(22.0), 20.0);
+    let size = key_cap_size(painter, key, p);
+    let (g, enter, inner) = key_cap_parts(painter, key, p);
     let r = Rect::from_min_size(pos2(right_center.x - size.x, right_center.y - size.y / 2.0), size);
     painter.rect(r, theme::RADIUS_SMALL, p.canvas_subtle, Stroke::new(1.0, p.border), egui::StrokeKind::Inside);
+    let left = r.center().x - inner / 2.0;
+    let text_w = g.size().x;
+    if text_w > 0.0 {
+        painter.galley(pos2(left, r.center().y - g.size().y / 2.0), g, p.fg_muted);
+    }
     if enter {
         // Down from the top right, then left, with an arrowhead.
-        let c = r.center();
+        let c = pos2(left + inner - ENTER_W / 2.0, r.center().y);
         let s = Stroke::new(1.25, p.fg_muted);
         let (top, corner, tip) = (pos2(c.x + 4.0, c.y - 4.0), pos2(c.x + 4.0, c.y + 2.0), pos2(c.x - 4.0, c.y + 2.0));
         painter.add(egui::Shape::line(vec![top, corner, tip], s));
         painter.add(egui::Shape::line(vec![tip + vec2(3.0, -3.0), tip, tip + vec2(3.0, 3.0)], s));
-    } else {
-        painter.galley(r.center() - g.size() / 2.0, g, p.fg_muted);
     }
     r
 }
@@ -351,39 +448,33 @@ pub fn settings_box(app: &mut App, ctx: &egui::Context) {
     let mut changes = Vec::new();
     let mut done = false;
     let resp = modal(ctx, "settings", |ui| {
-        modal_section(ui, |ui| {
-            ui.label(RichText::new("Settings").font(theme::bold(theme::TEXT_TITLE)).color(p.fg));
-        });
+        done = modal_header(ui, "Settings", p);
         modal_divider(ui, p);
-        modal_section(ui, |ui| {
+        modal_scroll(ui, |ui| {
             ui.label(RichText::new("Hidden owners and repos").font(theme::bold(theme::TEXT_BODY)).color(p.fg));
             ui.label(RichText::new("Pull requests from checked owners and repos are left out of every list.").size(theme::TEXT_DENSE).color(p.fg_muted));
-            let max_h = (ctx.content_rect().height() - 340.0).max(160.0);
-            egui::ScrollArea::vertical().max_height(max_h).auto_shrink([false, true]).show(ui, |ui| {
-                // Rows are control height already; no gap between them.
-                ui.spacing_mut().item_spacing.y = 0.0;
-                for (owner, repos) in &owners {
-                    let mut on = app.settings.is_ignored(owner);
-                    if checkbox(ui, &mut on, RichText::new(owner).font(theme::bold(theme::TEXT_DENSE)).color(p.fg), p).changed() {
-                        changes.push((owner.clone(), on));
-                    }
-                    let owner_on = on;
-                    for repo in repos {
-                        ui.horizontal(|ui| {
-                            // Repo boxes line up under the owner's name.
-                            ui.add_space(theme::CHECK_BOX);
-                            let name = repo.split_once('/').map_or(repo.as_str(), |(_, n)| n);
-                            // A whole owner ignored covers its repos.
-                            let mut on = owner_on || app.settings.is_ignored(repo);
-                            let resp =
-                                ui.add_enabled_ui(!owner_on, |ui| checkbox(ui, &mut on, RichText::new(name).size(theme::TEXT_DENSE).color(p.fg), p)).inner;
-                            if resp.changed() {
-                                changes.push((repo.clone(), on));
-                            }
-                        });
-                    }
+            // Rows are control height already; no gap between them.
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for (owner, repos) in &owners {
+                let mut on = app.settings.is_ignored(owner);
+                if checkbox(ui, &mut on, RichText::new(owner).font(theme::bold(theme::TEXT_DENSE)).color(p.fg), p).changed() {
+                    changes.push((owner.clone(), on));
                 }
-            });
+                let owner_on = on;
+                for repo in repos {
+                    ui.horizontal(|ui| {
+                        // Repo boxes line up under the owner's name.
+                        ui.add_space(theme::CHECK_BOX);
+                        let name = repo.split_once('/').map_or(repo.as_str(), |(_, n)| n);
+                        // A whole owner ignored covers its repos.
+                        let mut on = owner_on || app.settings.is_ignored(repo);
+                        let resp = ui.add_enabled_ui(!owner_on, |ui| checkbox(ui, &mut on, RichText::new(name).size(theme::TEXT_DENSE).color(p.fg), p)).inner;
+                        if resp.changed() {
+                            changes.push((repo.clone(), on));
+                        }
+                    });
+                }
+            }
         });
         modal_divider(ui, p);
         modal_section(ui, |ui| {
@@ -392,7 +483,9 @@ pub fn settings_box(app: &mut App, ctx: &egui::Context) {
                     ui.label(RichText::new(format!("Saved in {}", tilde(&path))).size(theme::TEXT_SMALL).color(p.fg_muted));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    done = ui.add(primary_button("Done", p)).clicked();
+                    if ui.add(primary_button("Done", p)).clicked() {
+                        done = true;
+                    }
                 });
             });
         });
@@ -403,6 +496,137 @@ pub fn settings_box(app: &mut App, ctx: &egui::Context) {
     if done || resp.should_close() {
         app.settings_open = false;
     }
+}
+
+/// The help window is wide enough for its two columns.
+const HELP_W: f32 = 800.0;
+
+/// The help window's left column: how the app works, in short.
+const HELP_TOPICS: &[(&str, &str)] = &[
+    (
+        "Your pull requests",
+        "The list on the left has five views: Created, Assigned, Mentioned, Review requests and Involved. Switch between open and closed ones at its top.",
+    ),
+    ("Search", "The search box takes any GitHub search, like repo:owner/name label:bug. Press Enter to run it."),
+    ("Open one", "Click a row to open it here. Double-click opens it on github.com. Right-click to copy its link."),
+    ("Review and merge", "Comment, approve, request changes and merge from the Conversation tab. Files changed shows the diff."),
+    ("Hide noise", "Settings (the gear, top right) leaves owners and repos out of every list."),
+    ("Staying current", "Lists refresh every five minutes and when you come back to the window."),
+    ("Sign out", "Right-click your avatar, top right."),
+];
+
+/// What a shortcut does, and its alternatives. Keys in one alternative
+/// are pressed together.
+type Shortcut = (&'static str, &'static [&'static [&'static str]]);
+
+/// The help window's shortcuts, by group.
+const HELP_KEYS: &[(&str, &[Shortcut])] = &[
+    (
+        "Move around",
+        &[
+            ("Next / previous pull request", &[&["j", "k"], &["↓", "↑"]]),
+            ("Go to a pull request by number or link", &[&["⌘K"]]),
+            ("Search", &[&["/"], &["⌘F"]]),
+            ("Switch tabs, Conversation to New", &[&["⌘1", "⌘2", "⌘3", "⌘4", "⌘5"]]),
+            ("Back from a commit", &[&["Esc"]]),
+        ],
+    ),
+    (
+        "Pull request",
+        &[("Open on GitHub", &[&["⌘O"]]), ("Copy link", &[&["c"], &["⇧⌘C"]]), ("Send a comment or reply", &[&["⌘↵"]]), ("Cancel a reply", &[&["Esc"]])],
+    ),
+    (
+        "Reviewing a diff",
+        &[
+            ("Next / previous file", &[&["n", "p"]]),
+            ("Next file you haven't viewed", &[&["u"]]),
+            ("Mark the file viewed", &[&["v"]]),
+            ("Previous / next commit, on a commit's page", &[&["[", "]"]]),
+        ],
+    ),
+    (
+        "Window",
+        &[
+            ("Show or hide the pull request list", &[&["⌘B"]]),
+            ("Show or hide details or the file list", &[&["⇧⌘B"]]),
+            ("Refresh", &[&["⌘R"]]),
+            ("This help", &[&["⌘?"], &["?"]]),
+            ("Close the window", &[&["⌘W"]]),
+        ],
+    ),
+];
+
+/// ⌘? or ?: what the app does, and every keyboard shortcut.
+pub fn help_box(app: &mut App, ctx: &egui::Context) {
+    if !app.help_open {
+        return;
+    }
+    let p = theme::palette(ctx);
+    let mut closed = false;
+    let resp = modal_sized(ctx, "help", HELP_W, |ui| {
+        closed = modal_header(ui, "Help", p);
+        modal_divider(ui, p);
+        modal_scroll(ui, |ui| {
+            // A wide gutter between the columns, normal spacing in them.
+            let gap = ui.spacing().item_spacing.x;
+            ui.spacing_mut().item_spacing.x = 32.0;
+            ui.columns(2, |cols| {
+                for col in cols.iter_mut() {
+                    col.spacing_mut().item_spacing.x = gap;
+                }
+                // Columns justify by default, which spreads wrapped words out.
+                cols[0].with_layout(egui::Layout::top_down(egui::Align::Min), |left| {
+                    help_heading(left, "Getting started", p);
+                    for (title, text) in HELP_TOPICS {
+                        left.add_space(6.0);
+                        left.label(RichText::new(*title).font(theme::bold(theme::TEXT_DENSE)).color(p.fg));
+                        left.label(RichText::new(*text).size(theme::TEXT_DENSE).color(p.fg_muted));
+                    }
+                });
+                let right = &mut cols[1];
+                help_heading(right, "Keyboard shortcuts", p);
+                for (i, (group, rows)) in HELP_KEYS.iter().enumerate() {
+                    right.add_space(if i == 0 { 6.0 } else { 12.0 });
+                    right.label(RichText::new(*group).font(theme::bold(theme::TEXT_DENSE)).color(p.fg));
+                    for (what, keys) in *rows {
+                        shortcut_row(right, what, keys, p);
+                    }
+                }
+                if !cfg!(target_os = "macos") {
+                    right.add_space(12.0);
+                    right.label(RichText::new("On Windows and Linux, use Ctrl instead of ⌘.").size(theme::TEXT_SMALL).color(p.fg_muted));
+                }
+            });
+        });
+    });
+    if closed || resp.should_close() {
+        app.help_open = false;
+    }
+}
+
+fn help_heading(ui: &mut Ui, text: &str, p: &Palette) {
+    ui.label(RichText::new(text).font(theme::bold(theme::TEXT_BODY)).color(p.fg));
+}
+
+/// One help row: what it does on the left, its key caps on the right, with
+/// "or" between alternatives.
+fn shortcut_row(ui: &mut Ui, what: &str, keys: &[&[&str]], p: &Palette) {
+    let (r, _) = ui.allocate_exact_size(vec2(ui.available_width(), 28.0), Sense::hover());
+    let painter = ui.painter();
+    let mut x = r.right();
+    for (i, alt) in keys.iter().rev().enumerate() {
+        if i > 0 {
+            let g = painter.layout_no_wrap("or".into(), theme::body(theme::TEXT_SMALL), p.fg_muted);
+            x -= g.size().x + 6.0;
+            painter.galley(pos2(x, r.center().y - g.size().y / 2.0), g, p.fg_muted);
+            x -= 6.0;
+        }
+        for key in alt.iter().rev() {
+            x = key_cap(painter, pos2(x, r.center().y), key, p).left() - 4.0;
+        }
+    }
+    let g = painter.layout_no_wrap(what.into(), theme::body(theme::TEXT_DENSE), p.fg);
+    painter.galley(pos2(r.left(), r.center().y - g.size().y / 2.0), g, p.fg);
 }
 
 pub fn goto_box(app: &mut App, ctx: &egui::Context) {
@@ -1124,7 +1348,8 @@ pub fn paint_checkbox(painter: &egui::Painter, b: Rect, on: bool, hovered: bool,
 /// the × was clicked (the caller decides what clearing means).
 pub fn search_input(ui: &mut Ui, id: egui::Id, text: &mut String, hint: &str, clearable: bool, clear_label: &str, p: &Palette) -> (egui::Response, bool) {
     let focused = ui.memory(|m| m.has_focus(id));
-    let (rect, frame) = ui.allocate_exact_size(vec2(ui.available_width(), theme::CONTROL_H), Sense::click());
+    // Clicks only: the text field inside is the one Tab stop.
+    let (rect, frame) = ui.allocate_exact_size(vec2(ui.available_width(), theme::CONTROL_H), Sense::CLICK);
     let stroke = if focused {
         Stroke::new(2.0, p.accent_emphasis)
     } else if frame.hovered() || ui.rect_contains_pointer(rect) {

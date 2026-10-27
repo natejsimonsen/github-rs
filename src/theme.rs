@@ -50,6 +50,15 @@ pub const RADIUS_SMALL: u8 = 3;
 /// Dialogs, menus and popups.
 pub const RADIUS_OVERLAY: u8 = 12;
 
+/// Width of the keyboard focus ring.
+pub const FOCUS_RING: f32 = 2.0;
+
+/// Primer's focus outline: 2px of accent emphasis, drawn on whatever
+/// Tab lands on. Text inputs have their own focused border instead.
+pub fn focus_ring(p: &Palette) -> Stroke {
+    Stroke::new(FOCUS_RING, p.accent_emphasis)
+}
+
 /// The one shadow for floating surfaces: dialogs, menus, popups.
 pub fn overlay_shadow(p: &Palette) -> egui::epaint::Shadow {
     egui::epaint::Shadow { offset: [0, 8], blur: 24, spread: 0, color: Color32::from_black_alpha(if p.dark { 150 } else { 45 }) }

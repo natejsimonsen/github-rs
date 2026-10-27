@@ -225,7 +225,7 @@ fn folding(app: &mut App, ui: &mut Ui, full: impl FnOnce(&mut App, &mut Ui), sli
 /// Once you scroll into a PR: one line with its state and title, so the
 /// page keeps most of the window (GitHub's sticky header).
 /// Under "No pull request selected", with or without PRs in the list.
-const EMPTY_HINT: &str = "⌘K go to any pull request · j / k move through the list";
+const EMPTY_HINT: &str = "⌘K go to any pull request · j / k move through the list · ⌘? help and shortcuts";
 
 fn slim_header(ui: &mut Ui, p: &Palette, sel: &PrSummary, d: Option<&PrDetail>) {
     let state = d.map(|d| d.state.as_str()).unwrap_or(&sel.state);

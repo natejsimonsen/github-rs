@@ -303,6 +303,8 @@ pub enum Action {
     FindToken,
     SignOut,
     OpenSettings,
+    /// ⌘?: open or close the help window.
+    ToggleHelp,
     /// Leave an owner or "owner/repo" out of every list (true), or bring it back.
     SetIgnored(String, bool),
 }
@@ -368,6 +370,8 @@ pub struct App {
     /// settings.json, and whether its window is open.
     pub settings: crate::settings::Settings,
     pub settings_open: bool,
+    /// The ⌘? help window: how the app works and every shortcut.
+    pub help_open: bool,
     /// Your organizations, once Settings has asked for them.
     pub orgs: Option<Vec<String>>,
     goto_seq: u64,
@@ -492,6 +496,7 @@ impl App {
             goto: None,
             settings: crate::settings::load(),
             settings_open: false,
+            help_open: false,
             orgs: None,
             goto_seq: 0,
             follow_list: false,
@@ -1502,6 +1507,7 @@ impl App {
                     });
                 }
             }
+            Action::ToggleHelp => self.help_open = !self.help_open,
             Action::SetIgnored(entry, on) => {
                 self.settings.set_ignored(&entry, on);
                 if let Err(e) = crate::settings::save(&self.settings) {
@@ -1753,7 +1759,10 @@ impl App {
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        let typing = ctx.egui_wants_keyboard_input() || self.goto.is_some();
+        // Only a text box swallows plain keys; a Tab-focused button doesn't.
+        let typing_text = ctx.text_edit_focused() || self.goto.is_some();
+        // Keys behind the help window shouldn't move the list.
+        let typing = typing_text || self.help_open;
         let cmd = |k| KeyboardShortcut::new(Modifiers::COMMAND, k);
         let cmd_shift = |k| KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, k);
         let mut acts = Vec::new();
@@ -1785,6 +1794,10 @@ impl App {
             if i.consume_shortcut(&cmd(Key::K)) {
                 acts.push(Action::ToggleGoTo);
             }
+            // ⌘? is ⇧⌘/ on most keyboards; the OS reports either key.
+            if i.consume_shortcut(&cmd(Key::Questionmark)) || i.consume_shortcut(&cmd(Key::Slash)) {
+                acts.push(Action::ToggleHelp);
+            }
             if let Some(pr) = &self.selected {
                 if i.consume_shortcut(&cmd(Key::O)) {
                     acts.push(Action::OpenUrl(pr.url.clone()));
@@ -1799,13 +1812,17 @@ impl App {
         if close {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
+        // A plain ? opens help too, and closes it again.
+        if !typing_text && ctx.input(|i| i.key_pressed(Key::Questionmark) || (i.modifiers.shift_only() && i.key_pressed(Key::Slash))) {
+            acts.push(Action::ToggleHelp);
+        }
         if !typing {
             let (down, up, slash, copy, escape) = ctx.input(|i| {
                 let plain = i.modifiers.is_none();
                 (
                     i.key_pressed(Key::ArrowDown) || i.key_pressed(Key::J),
                     i.key_pressed(Key::ArrowUp) || i.key_pressed(Key::K),
-                    i.key_pressed(Key::Slash),
+                    !i.modifiers.shift && i.key_pressed(Key::Slash),
                     plain && i.key_pressed(Key::C),
                     plain && i.key_pressed(Key::Escape),
                 )
@@ -2058,10 +2075,12 @@ impl eframe::App for App {
             views::main(self, ui);
             views::goto_box(self, &ctx);
             views::settings_box(self, &ctx);
+            views::help_box(self, &ctx);
         } else {
             views::sign_in(self, ui);
         }
         views::toast(self, &ctx);
+        focus_ring(&ctx);
 
         for a in std::mem::take(&mut self.actions) {
             self.apply(a, &ctx);
@@ -2101,6 +2120,26 @@ pub fn first_unviewed(files: &[FileDiff]) -> usize {
 pub fn next_unviewed(files: &[FileDiff], at: usize) -> Option<usize> {
     let n = files.len();
     (1..n).map(|k| (at + k) % n).find(|&i| !files[i].viewed)
+}
+
+/// Draw Primer's focus ring on the focused control. Our buttons paint
+/// their own fills, so egui's focus look never shows; this covers them all.
+/// Clicks don't focus buttons in egui, so the ring only follows Tab.
+/// Text inputs are skipped: they draw their own focused border.
+fn focus_ring(ctx: &egui::Context) {
+    let Some(id) = ctx.memory(|m| m.focused()) else { return };
+    if ctx.text_edit_focused() {
+        return;
+    }
+    let Some(resp) = ctx.read_response(id) else { return };
+    let p = theme::palette(ctx);
+    let rect = resp.interact_rect;
+    if !rect.is_positive() {
+        return;
+    }
+    // The widget's own layer, so the ring sits right above it, under
+    // anything floating on top.
+    ctx.layer_painter(resp.layer_id).rect_stroke(rect, theme::RADIUS, theme::focus_ring(p), egui::StrokeKind::Inside);
 }
 
 /// GitHub's search can list a PR that was closed a moment ago under

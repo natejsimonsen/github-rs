@@ -44,6 +44,8 @@ pub enum Icon {
     FolderOpen,
     Code,
     Gear,
+    /// "?" in a circle, for help.
+    Question,
 }
 
 pub fn show(ui: &mut Ui, icon: Icon, size: f32, color: Color32) -> Response {
@@ -156,6 +158,19 @@ pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
             }
             ring(8.0, 8.0, 4.5);
             ring(8.0, 8.0, 1.75);
+        }
+        Icon::Question => {
+            ring(8.0, 8.0, 6.75);
+            // The hook: left, over the top, round to the stem.
+            let mut pts: Vec<Pos2> = (0..=16)
+                .map(|i| {
+                    let a = std::f32::consts::PI * (1.0 + 1.25 * i as f32 / 16.0);
+                    at(8.0 + 2.0 * a.cos(), 6.25 + 2.0 * a.sin())
+                })
+                .collect();
+            pts.extend([at(8.0, 8.6), at(8.0, 9.5)]);
+            p.add(Shape::line(pts, stroke));
+            p.circle_filled(at(8.0, 11.6), 0.95 * s, color);
         }
         Icon::Eye => {
             let pts: Vec<Pos2> = (0..=24)
