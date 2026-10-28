@@ -1,6 +1,6 @@
 [package]
 name = "github-prs"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 description = "A fast desktop app for GitHub pull requests"
 license = "MIT"
