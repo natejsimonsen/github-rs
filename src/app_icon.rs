@@ -23,19 +23,34 @@ fn tile_dist(p: (f32, f32), min: f32, max: f32, r: f32) -> f32 {
     outside + qx.max(qy).min(0.0) - r
 }
 
+/// Signed distance to a triangle (negative inside).
+fn tri_dist(p: (f32, f32), t: [(f32, f32); 3]) -> f32 {
+    let mut d = f32::MIN;
+    for i in 0..3 {
+        let (a, b) = (t[i], t[(i + 1) % 3]);
+        let (nx, ny) = (b.1 - a.1, a.0 - b.0);
+        let len = (nx * nx + ny * ny).sqrt();
+        d = d.max(((p.0 - a.0) * nx + (p.1 - a.1) * ny) / len);
+    }
+    d
+}
+
 /// The icon as a `size`×`size` image. Laid out on a 1024 grid, then scaled.
 pub fn draw(size: u32) -> RgbaImage {
     let k = size as f32 / 1024.0;
 
-    // The PR icon on its 16-unit grid, same shape as icons.rs.
-    let rings = [(4.25, 3.5), (4.25, 12.5), (11.75, 12.5)];
-    let paths: [&[(f32, f32)]; 3] =
-        [&[(4.25, 5.25), (4.25, 10.75)], &[(11.75, 10.75), (11.75, 6.0), (11.3, 4.6), (10.2, 3.8), (7.5, 3.5)], &[(9.25, 1.75), (7.5, 3.5), (9.25, 5.25)]];
-    // Apple's icon grid: an 824px tile centered in 1024, glyph ~560px wide.
+    // GitHub's pull request symbol on a 16-unit grid: two commits joined on
+    // the left, one on the right whose line bends up and points back left.
+    let rings = [(3.75, 3.5), (3.75, 12.5), (12.25, 12.5)];
+    let lines = [((3.75, 5.25), (3.75, 10.75)), ((12.25, 10.75), (12.25, 6.0)), ((9.75, 3.5), (9.0, 3.5))];
+    // The rounded corner between the right line and the arrow.
+    let (bend, bend_r) = ((9.75, 6.0), 2.5);
+    let arrow = [(7.0, 3.5), (9.25, 1.25), (9.25, 5.75)];
+    // Apple's icon grid: an 824px tile centered in 1024, glyph ~470px wide.
     let scale = 35.0 * k;
     let offset = (size as f32 - 16.0 * scale) / 2.0;
     let grid = |(x, y): (f32, f32)| (offset + x * scale, offset + y * scale);
-    let half_stroke = 0.75 * scale;
+    let half_stroke = 0.625 * scale;
     let ring_r = 1.75 * scale;
 
     let bg_top = [0x2d, 0x33, 0x3b];
@@ -57,12 +72,16 @@ pub fn draw(size: u32) -> RgbaImage {
             let (cx, cy) = grid(r);
             d = d.min((((p.0 - cx).powi(2) + (p.1 - cy).powi(2)).sqrt() - ring_r).abs());
         }
-        for path in paths {
-            for w in path.windows(2) {
-                d = d.min(seg_dist(p, grid(w[0]), grid(w[1])));
-            }
+        for &(a, b) in &lines {
+            d = d.min(seg_dist(p, grid(a), grid(b)));
         }
-        let ink = (half_stroke + 0.5 - d).clamp(0.0, 1.0);
+        let (bx, by) = grid(bend);
+        if p.0 >= bx && p.1 <= by {
+            d = d.min((((p.0 - bx).powi(2) + (p.1 - by).powi(2)).sqrt() - bend_r * scale).abs());
+        }
+        let stroke = (half_stroke + 0.5 - d).clamp(0.0, 1.0);
+        let head = (0.5 - tri_dist(p, arrow.map(grid))).clamp(0.0, 1.0);
+        let ink = stroke.max(head);
         for i in 0..3 {
             c[i] = c[i] * (1.0 - ink) + green[i] as f32 * ink;
         }
