@@ -44,7 +44,8 @@ rustPlatform.buildRustPackage {
   cargoLock.lockFile = ../Cargo.lock;
 
   # macOS: also make "GitHub PRs.app", so the OS can hand it links.
-  # (No icon: building one needs Apple's iconutil, which Nix doesn't have.)
+  # (No .icns, since that needs Apple's iconutil. The app sets its Dock icon
+  # itself, so only Finder shows a plain one.)
   postInstall = lib.optionalString stdenv.hostPlatform.isDarwin ''
     app="$out/Applications/GitHub PRs.app/Contents"
     mkdir -p "$app/MacOS"
