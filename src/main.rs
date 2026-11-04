@@ -5,6 +5,7 @@
 #![allow(clippy::large_enum_variant)]
 
 mod app;
+mod app_icon;
 mod auth;
 mod cache;
 mod diff;
@@ -36,6 +37,7 @@ fn main() -> eframe::Result {
         viewport: egui::ViewportBuilder::default()
             .with_title("Pull requests")
             .with_app_id("github-prs")
+            .with_icon(app_icon::icon_data())
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([900.0, 560.0])
             // macOS: no title bar. The app fills the window, its header drags
